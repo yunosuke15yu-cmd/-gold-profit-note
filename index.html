@@ -250,6 +250,47 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-view-home .kgf-four{grid-template-columns:repeat(2,minmax(0,1fr))!important}
  .kgf-view-home .kgf-four .kgf-metric strong{font-size:16px!important}
 }
+
+/* Phase 8 — iPhone finishing pass: account strip, KPI visibility, nav icons */
+@media(max-width:700px){
+ /* compact account strip */
+ .kgf-view-home .kgf-account{
+   grid-template-columns:repeat(4,minmax(0,1fr))!important;
+   border-radius:9px!important;
+ }
+ .kgf-view-home .kgf-account .kgf-metric{
+   padding:9px 5px!important;
+   min-height:62px!important;
+   border-bottom:0!important;
+   text-align:left!important;
+ }
+ .kgf-view-home .kgf-account .kgf-metric span{font-size:7px!important;white-space:nowrap!important}
+ .kgf-view-home .kgf-account .kgf-metric strong{font-size:11px!important;margin-top:6px!important;letter-spacing:-.035em!important}
+ .kgf-view-home .kgf-account .kgf-metric small{font-size:6px!important;white-space:nowrap!important}
+ /* slightly denser chart so KPI cards are visible above nav */
+ .kgf-view-home .gn-xau-chart{height:184px!important}
+ .kgf-view-home .gn-xau-card{padding-bottom:7px!important}
+ .kgf-view-home .gn-xau-foot{font-size:7px!important}
+ .kgf-view-home .kgf-four{margin-top:5px!important}
+ .kgf-view-home .kgf-four .kgf-metric{min-height:56px!important;padding:7px 2px!important}
+ .kgf-view-home .kgf-four .kgf-metric strong{font-size:12px!important}
+ /* polished nav */
+ .kgf-nav{height:auto!important;background:rgba(2,11,17,.985)!important;border-top:1px solid #17404e!important;box-shadow:0 -10px 26px rgba(0,0,0,.28)!important}
+ .kgf-nav button{min-height:50px!important;gap:4px!important}
+ .kgf-nav button b{width:24px;height:24px;display:grid;place-items:center;border-radius:7px;font-size:0!important;position:relative}
+ .kgf-nav button b:before{font-size:17px;line-height:1}
+ .kgf-nav button:nth-child(1) b:before{content:"⌂"}
+ .kgf-nav button:nth-child(2) b:before{content:"▥"}
+ .kgf-nav button:nth-child(3) b:before{content:"◔"}
+ .kgf-nav button:nth-child(4) b:before{content:"☷"}
+ .kgf-nav button:nth-child(5) b:before{content:"⚙"}
+ .kgf-nav button span{font-size:8px!important}
+ .kgf-nav button.active b{background:rgba(239,183,47,.10)!important;color:#f1bb35!important;box-shadow:0 0 16px rgba(239,183,47,.12)!important}
+}
+@media(max-width:375px){
+ .kgf-view-home .kgf-account{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .kgf-view-home .kgf-account .kgf-metric strong{font-size:14px!important}
+}
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
 Copyright (c) 2013-present, Facebook, Inc.
