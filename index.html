@@ -303,7 +303,34 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-goal-ring svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
  .kgf-goal-percent{position:relative;color:#f2d58c;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;max-width:100%;overflow-wrap:anywhere;text-align:center}
  .kgf-goal-amount{display:block;color:#bfccd5;font-size:10px;line-height:1.5;text-align:center;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
- .kgf-home-card .gn-neutral{color:#c5cdd5}
+.kgf-home-card .gn-neutral{color:#c5cdd5}
+}
+/* Monthly analysis: visible only in the iPhone analysis tab. */
+@media(max-width:700px){
+ .kgf-view-analysis .kgf-analysis-safe{min-width:0;padding-bottom:12px}
+ .kgf-analysis-month{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:7px;margin:12px 0 9px}
+ .kgf-analysis-month button{min-height:44px;border:1px solid rgba(224,181,83,.36);border-radius:10px;background:#111c24;color:#edc76a;font-size:25px;line-height:1}
+ .kgf-analysis-month strong{text-align:center;color:#f4d587;font-size:17px;white-space:nowrap}
+ .kgf-analysis-source{margin:3px 0 10px;color:#8da0af;font-size:10px;text-align:center}
+ .kgf-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .kgf-analysis-grid>div{min-width:0;border-color:rgba(217,183,95,.28);background:linear-gradient(145deg,#10202b,#071019)}
+ .kgf-analysis-grid strong{font-size:clamp(14px,4vw,19px);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+ .kgf-calendar{margin-top:12px;padding:10px 7px 12px;border:1px solid #8c6116;border-radius:10px;background:#050e15;min-width:0}
+ .kgf-calendar h3{margin:0 0 10px;color:#efd079;font-size:14px}
+ .kgf-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;min-width:0}
+ .kgf-calendar-weekday{text-align:center;color:#9dacb8;font-size:9px;padding:4px 0}
+ .kgf-calendar-day{box-sizing:border-box;min-width:0;min-height:52px;padding:5px 2px;border:1px solid #1e2e38;border-radius:6px;background:#0b141b;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:6px;text-align:center}
+ .kgf-calendar-day.win{background:#0a261d;border-color:#20533d}
+ .kgf-calendar-day.loss{background:#2a1218;border-color:#5c2834}
+ .kgf-calendar-day.today{outline:1px solid #e2b84d;outline-offset:-2px}
+ .kgf-calendar-day b{color:#dce5eb;font-size:10px;line-height:1}
+ .kgf-calendar-day small{display:block;width:100%;color:#c6d4d7;font-size:clamp(7px,2vw,9px);line-height:1;white-space:nowrap;letter-spacing:-.02em}
+ .kgf-calendar-day.win small{color:#6cddab}.kgf-calendar-day.loss small{color:#ff91a0}
+ .kgf-calendar-legend{display:flex;justify-content:center;flex-wrap:wrap;gap:8px 13px;margin-top:11px;color:#aab8c2;font-size:10px}
+ .kgf-calendar-legend span{display:inline-flex;align-items:center;gap:4px}
+ .kgf-calendar-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;border:1px solid #34424a;background:#0b141b}
+ .kgf-calendar-legend .win i{border-color:#20533d;background:#0a261d}.kgf-calendar-legend .loss i{border-color:#5c2834;background:#2a1218}
+ .kgf-analysis-detail{margin:16px 0 5px;color:#edc76a;font-size:13px}
 }
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
@@ -797,6 +824,66 @@ function homeSummary(metrics, today = mt5Today()) {
         todayCount: day ? day.trades : 0, monthPnl, goal, progress,
         ring: Math.max(0, Math.min(100, progress)) };
 }
+function jstDate(value) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(value);
+    const found = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${found.year}-${found.month}-${found.day}`;
+}
+function jstTradeTime(value) {
+    if (typeof value !== "string") return null;
+    // The API's ISO timestamp carries its UTC offset. Older slash-formatted
+    // wall times are interpreted as JST. Never use the device's time zone.
+    const wall = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
+    if (wall) {
+        const date = `${wall[1]}-${wall[2].padStart(2, "0")}-${wall[3].padStart(2, "0")}`;
+        const hour = Number(wall[4]), minute = Number(wall[5]), second = Number(wall[6] || 0);
+        if (!validDate(date) || hour > 23 || minute > 59 || second > 59) return null;
+        return { date, at: Date.UTC(Number(wall[1]), Number(wall[2]) - 1, Number(wall[3]), hour - 9, minute, second) };
+    }
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) return null;
+    const at = new Date(value).getTime();
+    return Number.isFinite(at) ? { date: jstDate(new Date(at)), at } : null;
+}
+function shiftMonth(month, offset) {
+    const year = Number(month.slice(0, 4)), index = Number(month.slice(5, 7)) - 1;
+    return new Date(Date.UTC(year, index + offset, 1)).toISOString().slice(0, 7);
+}
+function monthlyTradeAnalysis(trades, month) {
+    const rows = [];
+    for (const trade of trades) {
+        const time = trade && jstTradeTime(trade.trade_time);
+        const pnl = trade && Number(trade.net_pnl);
+        if (time && time.date.slice(0, 7) === month && Number.isFinite(pnl))
+            rows.push({ ...time, pnl });
+    }
+    rows.sort((a, b) => a.at - b.at);
+    const days = new Map();
+    let grossProfit = 0, grossLoss = 0, wins = 0, losses = 0;
+    let maxWin = 0, maxLoss = 0, equity = 0, peak = 0, maxDD = 0;
+    for (const row of rows) {
+        const day = days.get(row.date) || { date: row.date, pnl: 0, trades: 0 };
+        day.pnl += row.pnl;
+        day.trades += 1;
+        days.set(row.date, day);
+        if (row.pnl > 0) { grossProfit += row.pnl; wins += 1; maxWin = Math.max(maxWin, row.pnl); }
+        if (row.pnl < 0) { grossLoss += -row.pnl; losses += 1; maxLoss = Math.max(maxLoss, -row.pnl); }
+        equity += row.pnl;
+        peak = Math.max(peak, equity);
+        maxDD = Math.max(maxDD, peak - equity);
+    }
+    const metrics = calculate([...days.values()]);
+    return { daily: metrics.daily, total: metrics.total, winDays: metrics.wins,
+        lossDays: metrics.losses, trades: rows.length, wins, losses, grossProfit,
+        grossLoss, maxDD, avgWin: wins ? grossProfit / wins : 0,
+        avgLoss: losses ? grossLoss / losses : 0, maxWin, maxLoss };
+}
+function calendarAmount(value) {
+    const abs = Math.abs(Math.round(value));
+    const compact = abs >= 10000 ? new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 }).format(abs) : abs.toLocaleString("ja-JP");
+    return `${value > 0 ? "+" : value < 0 ? "−" : ""}${compact}`;
+}
 function HomeSummaryCards({ summary }) {
     const { ready, todayPnl, todayCount, monthPnl, goal, progress, ring } = summary;
     return React.createElement("section", { className: "kgf-home-cards", "aria-label": "本日と月間の確定損益" },
@@ -1243,7 +1330,7 @@ class GoldProfitNote extends React.Component {
             theme: theme.theme, tab: "daily", date: mt5Today(), pnlInput: "", note: "",
             editing: null, formError: "", formErrorField: null, deleteTarget: null,
             notice: "", transfer: null, importText: "", importMode: "merge", importPreview: null,
-            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", syncState: "loading",
+            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), syncState: "loading",
         };
     }
     componentDidMount() {
@@ -1487,6 +1574,62 @@ class GoldProfitNote extends React.Component {
                             React.createElement(Icon, { name: "in", size: 16 }),
                             importMode === "replace" ? "置き換える" : "取り込む") : React.createElement("button", { type: "button", className: "gn-button gn-button-primary", onClick: this.previewImport }, "\u5185\u5BB9\u3092\u78BA\u8A8D")))));
     }
+    renderMonthlyAnalysis() {
+        const month = this.state.analysisMonth;
+        const result = monthlyTradeAnalysis(Array.isArray(this.state.mt5Trades) ? this.state.mt5Trades : [], month);
+        const daily = new Map(result.daily.map(day => [day.date, day]));
+        const first = utcDate(`${month}-01`);
+        const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+        const today = jstDate(new Date());
+        const card = (label, value, cls = "") => React.createElement("div", { key: label },
+            React.createElement("span", null, label),
+            React.createElement("strong", { className: "gn-mono " + cls }, value));
+        const cells = [];
+        for (let index = 0; index < first.getUTCDay(); index += 1)
+            cells.push(React.createElement("div", { key: `pad-${index}`, "aria-hidden": "true" }));
+        for (let day = 1; day <= count; day += 1) {
+            const date = `${month}-${String(day).padStart(2, "0")}`;
+            const record = daily.get(date);
+            const pnl = record ? record.pnl : 0;
+            cells.push(React.createElement("div", {
+                key: date, className: "kgf-calendar-day " + (pnl > 0 ? "win" : pnl < 0 ? "loss" : "neutral") + (date === today ? " today" : ""),
+                title: record ? `${date} ${signed(Math.round(pnl))}円` : `${date} 取引なし`,
+                "aria-label": record ? `${date} ${signed(Math.round(pnl))}円、${record.trades}取引` : `${date} 取引なし`,
+            }, React.createElement("b", null, day),
+            record && React.createElement("small", { className: "gn-mono" }, calendarAmount(pnl))));
+        }
+        const rate = result.wins + result.losses ? (result.wins / (result.wins + result.losses) * 100).toFixed(1) + "%" : "—";
+        const pf = result.grossLoss ? (result.grossProfit / result.grossLoss).toFixed(2) : result.grossProfit ? "∞" : "—";
+        return React.createElement("section", { className: "kgf-analysis-safe" },
+            React.createElement("div", { className: "kgf-pagehead" }, React.createElement("h2", null, "成績分析"), React.createElement("p", null, "月間ダッシュボード")),
+            React.createElement("div", { className: "kgf-analysis-month" },
+                React.createElement("button", { type: "button", "aria-label": "前月", onClick: () => this.setState({ analysisMonth: shiftMonth(month, -1) }) }, "‹"),
+                React.createElement("strong", { "aria-live": "polite" }, `${Number(month.slice(0, 4))}年${Number(month.slice(5, 7))}月`),
+                React.createElement("button", { type: "button", "aria-label": "翌月", onClick: () => this.setState({ analysisMonth: shiftMonth(month, 1) }) }, "›")),
+            React.createElement("p", { className: "kgf-analysis-source" }, "MT5確定取引を日本時間で集計"),
+            React.createElement("div", { className: "kgf-analysis-grid" },
+                card("月間確定損益", signed(Math.round(result.total)) + "円", tone(result.total)),
+                card("勝率", rate), card("取引回数", result.trades + "回"),
+                card("勝ち日数", result.winDays + "日", "gn-positive"),
+                card("負け日数", result.lossDays + "日", "gn-negative"),
+                card("Profit Factor", pf),
+                card("最大DD", result.maxDD ? "−" + Math.round(result.maxDD).toLocaleString("ja-JP") + "円" : "0円", "gn-negative")),
+            React.createElement("div", { className: "kgf-calendar" },
+                React.createElement("h3", null, "月間カレンダー"),
+                React.createElement("div", { className: "kgf-calendar-grid" },
+                    WEEKDAYS.map(day => React.createElement("div", { key: day, className: "kgf-calendar-weekday" }, day)), cells),
+                React.createElement("div", { className: "kgf-calendar-legend" },
+                    [["win", "勝ち"], ["loss", "負け"], ["neutral", "取引なし"]].map(([cls, label]) =>
+                        React.createElement("span", { key: cls, className: cls }, React.createElement("i", { "aria-hidden": "true" }), label)))),
+            React.createElement("h3", { className: "kgf-analysis-detail" }, "詳細分析"),
+            React.createElement("div", { className: "kgf-analysis-grid" },
+                card("平均利益", signed(Math.round(result.avgWin)) + "円", "gn-positive"),
+                card("平均損失", result.avgLoss ? "−" + Math.round(result.avgLoss).toLocaleString("ja-JP") + "円" : "0円", "gn-negative"),
+                card("最大利益", signed(Math.round(result.maxWin)) + "円", "gn-positive"),
+                card("最大損失", result.maxLoss ? "−" + Math.round(result.maxLoss).toLocaleString("ja-JP") + "円" : "0円", "gn-negative")),
+            React.createElement("h3", { className: "kgf-analysis-detail" }, "損益推移"),
+            React.createElement("div", { className: "kgf-analysis-chart" }, React.createElement(ProfitChart, { daily: result.daily })));
+    }
     renderKomaDashboard(data, period) {
         const s=this.state.mt5Status, tr=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
         const total=Number(data.total)||0, wins=Number(data.wins)||0, losses=Number(data.losses)||0;
@@ -1561,18 +1704,7 @@ class GoldProfitNote extends React.Component {
                     React.createElement("b",{className:String(x.side||"").toUpperCase()==="BUY"?"buy":"sell"},String(x.side||"—").toUpperCase()),
                     React.createElement("span",{className:"gn-mono"},Number(x.volume||0).toFixed(2)),
                     React.createElement("strong",{className:"gn-mono "+tone(Number(x.net_pnl)||0)},signed(Math.round(Number(x.net_pnl)||0))+"円")))),
-            React.createElement("section",{className:"kgf-analysis-safe"},
-                React.createElement("div",{className:"kgf-pagehead"},React.createElement("h2",null,"成績分析"),React.createElement("p",null,"MT5取引明細から自動集計")),
-                React.createElement("div",{className:"kgf-analysis-grid"},
-                    React.createElement("div",null,React.createElement("span",null,"累計損益"),React.createElement("strong",{className:"gn-positive gn-mono"},signed(Math.round(total))+"円")),
-                    React.createElement("div",null,React.createElement("span",null,"勝率"),React.createElement("strong",{className:"gn-mono"},rate.toFixed(1)+"%")),
-                    React.createElement("div",null,React.createElement("span",null,"Profit Factor"),React.createElement("strong",{className:"gn-mono"},pf>=99?"∞":pf.toFixed(2))),
-                    React.createElement("div",null,React.createElement("span",null,"最大DD"),React.createElement("strong",{className:"gn-negative gn-mono"},"-"+Math.round(maxDD).toLocaleString("ja-JP")+"円")),
-                    React.createElement("div",null,React.createElement("span",null,"平均利益"),React.createElement("strong",{className:"gn-positive gn-mono"},"+"+Math.round(avgWin).toLocaleString("ja-JP")+"円")),
-                    React.createElement("div",null,React.createElement("span",null,"平均損失"),React.createElement("strong",{className:"gn-negative gn-mono"},"-"+Math.round(avgLoss).toLocaleString("ja-JP")+"円")),
-                    React.createElement("div",null,React.createElement("span",null,"最大利益"),React.createElement("strong",{className:"gn-positive gn-mono"},"+"+Math.round(maxWin).toLocaleString("ja-JP")+"円")),
-                    React.createElement("div",null,React.createElement("span",null,"最大損失"),React.createElement("strong",{className:"gn-negative gn-mono"},"-"+Math.round(maxLoss).toLocaleString("ja-JP")+"円"))),
-                React.createElement("div",{className:"kgf-analysis-chart"},React.createElement(ProfitChart,{daily:data.daily}))),
+            this.state.safeView==="analysis" && this.renderMonthlyAnalysis(),
             React.createElement("nav",{className:"kgf-nav"},
                 React.createElement("button",{type:"button",className:this.state.safeView==="home"?"active":"",onClick:()=>this.setState({safeView:"home"})},React.createElement("b",null,"⌂"),React.createElement("span",null,"ホーム")),
                 React.createElement("button",{type:"button",className:this.state.safeView==="chart"?"active":"",onClick:()=>this.setState({safeView:"chart"})},React.createElement("b",null,"▥"),React.createElement("span",null,"チャート")),
