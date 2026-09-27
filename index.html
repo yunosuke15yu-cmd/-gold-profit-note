@@ -291,6 +291,34 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-view-home .kgf-account{grid-template-columns:repeat(2,minmax(0,1fr))!important}
  .kgf-view-home .kgf-account .kgf-metric strong{font-size:14px!important}
 }
+
+/* Phase 9 — chart tab interaction shell, safe/no React changes */
+@media(max-width:700px){
+ .kgf-view-chart .kgf-chart-focus{overflow:hidden!important}
+ .kgf-view-chart .gn-xau-card{min-height:calc(100vh - 165px)!important;padding:10px 8px!important}
+ .kgf-view-chart .gn-xau-chart{
+   height:470px!important;
+   overflow-x:auto!important;
+   overflow-y:hidden!important;
+   -webkit-overflow-scrolling:touch!important;
+   touch-action:pan-x!important;
+   overscroll-behavior-x:contain!important;
+   cursor:grab;
+ }
+ .kgf-view-chart .gn-xau-chart:active{cursor:grabbing}
+ .kgf-view-chart .gn-xau-chart svg{
+   width:920px!important;
+   min-width:920px!important;
+   max-width:none!important;
+   height:100%!important;
+ }
+ .kgf-view-chart .gn-xau-foot:before{
+   content:"← スワイプで過去を見る →";
+   color:#d3a33a;
+   margin-right:auto;
+ }
+ .kgf-view-chart .gn-xau-foot{gap:8px!important;flex-wrap:wrap!important}
+}
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
 Copyright (c) 2013-present, Facebook, Inc.
