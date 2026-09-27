@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="theme-color" content="#101923"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="KOMA GOLD 日記"><link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="description" content="ゴールド（XAUUSD）の損益を日ごとに記録。週別・月別の集計とJSONでのデータ移動に対応。"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: 'self'; connect-src 'self' https://qohtfituiipoglrgbrsl.supabase.co; manifest-src 'self'; base-uri 'none'; form-action 'none'"><title>KOMA GOLD 日記</title><link rel="icon" href="icon-192.png"><style>html,body{margin:0;padding:0;min-width:280px}body{background:#f2f5f8}@media(prefers-color-scheme:dark){body{background:#151b22}}
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="theme-color" content="#101923"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="KOMA GOLD 日記"><link rel="manifest" href="manifest.json"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="description" content="ゴールド（XAUUSD）の損益を日ごとに記録。週別・月別の集計とJSONでのデータ移動に対応。"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; worker-src 'self'; style-src 'unsafe-inline'; img-src data: 'self'; connect-src 'self' https://qohtfituiipoglrgbrsl.supabase.co; manifest-src 'self'; base-uri 'none'; form-action 'none'"><title>KOMA GOLD 日記</title><link rel="icon" href="icon-192.png"><style>html,body{margin:0;padding:0;min-width:280px}body{background:#f2f5f8}@media(prefers-color-scheme:dark){body{background:#151b22}}
 /* MT5 LIVE compact card v1.1 */
 .gn-live{padding:22px 24px!important;overflow:hidden}
 .gn-live-head{display:flex!important;align-items:flex-start!important;justify-content:space-between!important;gap:14px!important;margin-bottom:18px!important}
@@ -290,6 +290,20 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
 @media(max-width:375px){
  .kgf-view-home .kgf-account{grid-template-columns:repeat(2,minmax(0,1fr))!important}
  .kgf-view-home .kgf-account .kgf-metric strong{font-size:14px!important}
+}
+/* HOME summary cards: scoped to the existing mobile dashboard. */
+.kgf-home-cards{display:none}
+@media(max-width:700px){
+ .kgf-view-home .kgf-home-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+ .kgf-home-card{min-width:0;padding:14px 12px;border:1px solid rgba(220,178,83,.24);border-radius:14px;background:linear-gradient(145deg,#10202b,#071019);box-shadow:0 6px 20px rgba(0,0,0,.2)}
+ .kgf-home-card h2{margin:0 0 12px;color:#d7b76e;font-size:10px;letter-spacing:1.4px;font-weight:600}
+ .kgf-today-value{display:block;margin-top:22px;font-size:clamp(18px,5.2vw,25px);line-height:1.3;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+ .kgf-today-count{display:block;margin-top:9px;color:#91a3b4;font-size:10px;letter-spacing:1px;overflow-wrap:anywhere}
+ .kgf-goal-ring{position:relative;width:80px;height:80px;margin:0 auto 9px;display:grid;place-items:center}
+ .kgf-goal-ring svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+ .kgf-goal-percent{position:relative;color:#f2d58c;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;max-width:100%;overflow-wrap:anywhere;text-align:center}
+ .kgf-goal-amount{display:block;color:#bfccd5;font-size:10px;line-height:1.5;text-align:center;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+ .kgf-home-card .gn-neutral{color:#c5cdd5}
 }
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
@@ -761,6 +775,44 @@ function calculate(records) {
     }
     return { daily, total: cumulative, wins, losses, best, weekly: grouped("week"), monthly: grouped("month") };
 }
+function finiteAmount(value) {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : 0;
+}
+function mt5DailyMetrics(rows) {
+    // Use the API's daily totals (including trade counts), not the limited recent-trade list
+    // or the editable/local seed records. Reuse the existing monthly aggregation.
+    return calculate(rows.filter(row => row && validDate(row.trade_date)).map(row => ({
+        date: row.trade_date, pnl: finiteAmount(row.pnl),
+        trades: Math.max(0, Math.floor(finiteAmount(row.trades))),
+    })));
+}
+function homeSummary(metrics, today = mt5Today()) {
+    const day = metrics && metrics.daily.find(row => row.date === today);
+    const month = metrics && metrics.monthly.find(row => row.key === today.slice(0, 7));
+    const monthPnl = finiteAmount(month && month.pnl);
+    const goal = 100000;
+    const progress = monthPnl / goal * 100;
+    return { ready: !!metrics, todayPnl: finiteAmount(day && day.pnl),
+        todayCount: day ? day.trades : 0, monthPnl, goal, progress,
+        ring: Math.max(0, Math.min(100, progress)) };
+}
+function HomeSummaryCards({ summary }) {
+    const { ready, todayPnl, todayCount, monthPnl, goal, progress, ring } = summary;
+    return React.createElement("section", { className: "kgf-home-cards", "aria-label": "本日と月間の確定損益" },
+        React.createElement("article", { className: "kgf-home-card" },
+            React.createElement("h2", null, "TODAY"),
+            React.createElement("strong", { className: "kgf-today-value " + tone(todayPnl) }, ready ? signed(Math.round(todayPnl)) + "円" : "—"),
+            React.createElement("small", { className: "kgf-today-count" }, ready ? todayCount + " TRADES" : "同期中")),
+        React.createElement("article", { className: "kgf-home-card" },
+            React.createElement("h2", null, "MONTH GOAL"),
+            React.createElement("div", { className: "kgf-goal-ring", role: "img", "aria-label": ready ? "月間目標達成率 " + progress.toFixed(1) + "%" : "月間損益を同期中" },
+                React.createElement("svg", { viewBox: "0 0 80 80", "aria-hidden": "true" },
+                    React.createElement("circle", { cx: 40, cy: 40, r: 35, fill: "none", stroke: "#24313c", strokeWidth: 4 }),
+                    React.createElement("circle", { cx: 40, cy: 40, r: 35, fill: "none", stroke: "#dfb85e", strokeWidth: 4, pathLength: 100, strokeDasharray: "100 100", strokeDashoffset: 100 - ring })),
+                React.createElement("span", { className: "kgf-goal-percent" }, ready ? progress.toFixed(1) + "%" : "—")),
+            React.createElement("small", { className: "kgf-goal-amount" }, ready ? signed(Math.round(monthPnl)) + " / " + signed(goal) + "円" : "実データを同期中")));
+}
 function Icon({ name, size = 18, ...props }) {
     const paths = {
         book: React.createElement(Fragment, null,
@@ -1168,7 +1220,7 @@ class GoldProfitNote extends React.Component {
                 const next = Array.from(byDate.values()).sort((a,b)=>a.date.localeCompare(b.date));
                 const savedAt = nowISO();
                 const warning = this.persist(next, savedAt);
-                this.setState({ records: next, savedAt, warning, mt5Status: payload.status || null, mt5Trades: Array.isArray(payload.trades) ? payload.trades : [], mt5Candles: Array.isArray(payload.candles) ? payload.candles : [], syncState: "ok" });
+                this.setState({ records: next, savedAt, warning, mt5Metrics: mt5DailyMetrics(payload.daily), mt5Status: payload.status || null, mt5Trades: Array.isArray(payload.trades) ? payload.trades : [], mt5Candles: Array.isArray(payload.candles) ? payload.candles : [], syncState: "ok" });
                 if (!silent) this.notify("MT5の最新データを反映しました。");
             } catch (_) {
                 this.setState({ syncState: "error" });
@@ -1191,7 +1243,7 @@ class GoldProfitNote extends React.Component {
             theme: theme.theme, tab: "daily", date: mt5Today(), pnlInput: "", note: "",
             editing: null, formError: "", formErrorField: null, deleteTarget: null,
             notice: "", transfer: null, importText: "", importMode: "merge", importPreview: null,
-            importError: "", copyMessage: "", mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", syncState: "loading",
+            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", syncState: "loading",
         };
     }
     componentDidMount() {
@@ -1448,8 +1500,8 @@ class GoldProfitNote extends React.Component {
         const maxWin=profits.length?Math.max(...profits):0, maxLoss=lossesNet.length?Math.abs(Math.min(...lossesNet)):0;
         let eq=0,peak=0,maxDD=0; [...allTrades].reverse().forEach(x=>{eq+=Number(x.net_pnl)||0;peak=Math.max(peak,eq);maxDD=Math.max(maxDD,peak-eq);});
 
-        const today=mt5Today(), todayTrades=tr.filter(x=>x&&x.trade_date===today);
-        const todayPnl=todayTrades.reduce((a,x)=>a+(Number(x.net_pnl)||0,0),0);
+        const summary=homeSummary(this.state.mt5Metrics);
+        const {todayPnl,todayCount}=summary;
         const maxdd=maxDD;
         const daily=data.daily||[]; let run=0;
         const vals=daily.map(r=>(run+=Number(r.pnl)||0));
@@ -1468,10 +1520,11 @@ class GoldProfitNote extends React.Component {
                 metric("口座残高",s?Math.round(Number(s.balance)||0).toLocaleString("ja-JP")+"円":"—",""),
                 metric("有効証拠金",s?Math.round(Number(s.equity)||0).toLocaleString("ja-JP")+"円":"—",""),
                 metric("含み損益",s?signed(Math.round(Number(s.floating_pnl)||0))+"円":"—","",s?tone(Number(s.floating_pnl)||0):""),
-                metric("本日の損益",signed(Math.round(todayPnl))+"円",todayTrades.length+"取引",tone(todayPnl))),
+                metric("本日の損益",signed(Math.round(todayPnl))+"円",todayCount+"取引",tone(todayPnl))),
+            this.state.safeView==="home" && React.createElement(HomeSummaryCards,{summary}),
             React.createElement("div",{className:"kgf-chart-focus"},this.renderGoldChart()),
             React.createElement("section",{className:"kgf-four"},
-                metric("本日の損益",signed(Math.round(todayPnl))+"円",todayTrades.length+"取引",tone(todayPnl)),
+                metric("本日の損益",signed(Math.round(todayPnl))+"円",todayCount+"取引",tone(todayPnl)),
                 metric("勝率",rate.toFixed(1)+"%",wins+"勝 "+losses+"敗"),
                 metric("PF",pf>=99?"∞":pf.toFixed(2),"Profit Factor"),
                 metric("最大DD","-"+Math.round(maxdd).toLocaleString("ja-JP")+"円","実取引から算出","gn-negative")),
