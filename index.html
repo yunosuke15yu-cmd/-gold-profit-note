@@ -145,6 +145,18 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-analysis-chart{margin-top:8px;padding:10px 4px;border:1px solid #8c6116;border-radius:9px;background:#050e15}
  .kgf-analysis-chart .gn-chart-wrap{margin:0!important}
 }
+
+/* Safe navigation Phase 4: History enabled */
+@media(max-width:700px){
+ .kgf-history-safe{display:none}
+ .kgf-view-history .kgf-account,.kgf-view-history .kgf-chart-focus,.kgf-view-history .kgf-four,.kgf-view-history .kgf-equity,.kgf-view-history .kgf-recent,.kgf-view-history .kgf-motto,.kgf-view-history .kgf-analysis-safe{display:none!important}
+ .kgf-view-history .kgf-history-safe{display:block!important;padding-top:8px}
+ .kgf-history-safe{border:1px solid #8b6116;border-radius:10px;background:#050e15;padding:12px}
+ .kgf-history-head,.kgf-history-row{display:grid;grid-template-columns:1.25fr .72fr .62fr 1fr;gap:5px;align-items:center;border-bottom:1px solid rgba(61,102,126,.23)}
+ .kgf-history-head{padding:9px 2px;color:#8194a5;font-size:9px}
+ .kgf-history-row{padding:12px 2px;font-size:10px}
+ .kgf-history-row .buy{color:#28bfff}.kgf-history-row .sell{color:#ff536a}.kgf-history-row strong{text-align:right}
+}
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
 Copyright (c) 2013-present, Facebook, Inc.
@@ -1312,7 +1324,7 @@ class GoldProfitNote extends React.Component {
         const line=vals.map((v,i)=>(i?"L":"M")+xx(i)+" "+yy(v)).join(" ");
         const area=vals.length?line+" L "+xx(vals.length-1)+" "+(H-P)+" L "+xx(0)+" "+(H-P)+" Z":"";
         const metric=(label,value,sub,cls)=>React.createElement("div",{className:"kgf-metric"},React.createElement("span",null,label),React.createElement("strong",{className:"gn-mono "+(cls||"")},value),React.createElement("small",null,sub||""));
-        return React.createElement("div",{className:"kgf-dashboard "+(this.state.safeView==="chart"?"kgf-view-chart":this.state.safeView==="analysis"?"kgf-view-analysis":"kgf-view-home")},
+        return React.createElement("div",{className:"kgf-dashboard "+(this.state.safeView==="chart"?"kgf-view-chart":this.state.safeView==="analysis"?"kgf-view-analysis":this.state.safeView==="history"?"kgf-view-history":"kgf-view-home")},
             React.createElement("header",{className:"kgf-hero"},
                 React.createElement("div",{className:"kgf-logo"},"K"),
                 React.createElement("div",{className:"kgf-brand"},React.createElement("h1",null,"KOMA GOLD 日記"),React.createElement("p",null,"TRADE · LOG · ANALYZE · IMPROVE")),
@@ -1338,6 +1350,14 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div",{className:"kgf-title"},React.createElement("h2",null,"最近の取引"),React.createElement("span",null,"直近5件")),
                 tr.slice(0,5).map((x,i)=>React.createElement("div",{className:"kgf-trade",key:String(x.deal_ticket||i)},React.createElement("span",{className:"gn-mono"},String(x.trade_time||"").slice(11,16)),React.createElement("b",{className:String(x.side||"").toUpperCase()==="BUY"?"buy":"sell"},String(x.side||"—").toUpperCase()),React.createElement("span",{className:"gn-mono"},Number(x.volume||0).toFixed(2)),React.createElement("strong",{className:"gn-mono "+tone(Number(x.net_pnl)||0)},signed(Math.round(Number(x.net_pnl)||0))+"円")))),
             React.createElement("div",{className:"kgf-motto"},React.createElement("b",null,"小さな積み上げが、大きな結果をつくる。"),React.createElement("span",null,"SMALL STEPS MAKE BIG RESULTS.")),
+            React.createElement("section",{className:"kgf-history-safe"},
+                React.createElement("div",{className:"kgf-pagehead"},React.createElement("h2",null,"取引履歴"),React.createElement("p",null,"MT5から同期された直近の取引")),
+                React.createElement("div",{className:"kgf-history-head"},React.createElement("span",null,"日時"),React.createElement("span",null,"売買"),React.createElement("span",null,"Lot"),React.createElement("span",null,"損益")),
+                allTrades.slice(0,80).map((x,i)=>React.createElement("div",{className:"kgf-history-row",key:String(x.deal_ticket||i)},
+                    React.createElement("span",{className:"gn-mono"},String(x.trade_time||"").slice(5,16).replace("T"," ")),
+                    React.createElement("b",{className:String(x.side||"").toUpperCase()==="BUY"?"buy":"sell"},String(x.side||"—").toUpperCase()),
+                    React.createElement("span",{className:"gn-mono"},Number(x.volume||0).toFixed(2)),
+                    React.createElement("strong",{className:"gn-mono "+tone(Number(x.net_pnl)||0)},signed(Math.round(Number(x.net_pnl)||0))+"円")))),
             React.createElement("section",{className:"kgf-analysis-safe"},
                 React.createElement("div",{className:"kgf-pagehead"},React.createElement("h2",null,"成績分析"),React.createElement("p",null,"MT5取引明細から自動集計")),
                 React.createElement("div",{className:"kgf-analysis-grid"},
@@ -1354,7 +1374,7 @@ class GoldProfitNote extends React.Component {
                 React.createElement("button",{type:"button",className:this.state.safeView==="home"?"active":"",onClick:()=>this.setState({safeView:"home"})},React.createElement("b",null,"⌂"),React.createElement("span",null,"ホーム")),
                 React.createElement("button",{type:"button",className:this.state.safeView==="chart"?"active":"",onClick:()=>this.setState({safeView:"chart"})},React.createElement("b",null,"▥"),React.createElement("span",null,"チャート")),
                 React.createElement("button",{type:"button",className:this.state.safeView==="analysis"?"active":"",onClick:()=>this.setState({safeView:"analysis"})},React.createElement("b",null,"◔"),React.createElement("span",null,"分析")),
-                React.createElement("button",{type:"button",disabled:true},React.createElement("b",null,"☷"),React.createElement("span",null,"履歴")),
+                React.createElement("button",{type:"button",className:this.state.safeView==="history"?"active":"",onClick:()=>this.setState({safeView:"history"})},React.createElement("b",null,"☷"),React.createElement("span",null,"履歴")),
                 React.createElement("button",{type:"button",disabled:true},React.createElement("b",null,"⚙"),React.createElement("span",null,"設定")))
         );
     }
