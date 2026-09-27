@@ -175,6 +175,45 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-settings-actions button:active{background:#0a1720}
  .kgf-appinfo{margin-top:10px}.kgf-appinfo>div:last-child{grid-column:1/-1}
 }
+
+/* Phase 6 — Home polish only. Five-tab logic untouched. */
+@media(max-width:700px){
+ .kgf-view-home .kgf-hero{height:66px!important}
+ .kgf-view-home .kgf-logo{width:30px!important;height:39px!important;font-size:22px!important}
+ .kgf-view-home .kgf-brand h1{font-size:18px!important}
+ .kgf-view-home .kgf-brand p{font-size:5.8px!important;margin-top:3px!important}
+ .kgf-view-home .kgf-livebar{padding:7px 9px!important;margin:5px 0 7px!important}
+ .kgf-view-home .kgf-account{grid-template-columns:repeat(2,minmax(0,1fr))!important;margin-bottom:7px!important}
+ .kgf-view-home .kgf-account .kgf-metric{padding:9px!important}
+ .kgf-view-home .kgf-account .kgf-metric strong{font-size:16px!important}
+ .kgf-view-home .kgf-chart-focus .gn-xau-card{padding:9px 8px!important}
+ .kgf-view-home .kgf-chart-focus .gn-xau-chart{height:245px!important}
+ .kgf-view-home .kgf-chart-focus .gn-xau-price{font-size:28px!important}
+ .kgf-view-home .kgv4-meta{margin-top:6px!important}
+ .kgf-view-home .kgf-four{gap:6px!important;margin-top:7px!important}
+ .kgf-view-home .kgf-four .kgf-metric{padding:9px 5px!important}
+ .kgf-view-home .kgf-four .kgf-metric strong{font-size:17px!important}
+ .kgf-view-home .kgf-equity{padding:10px!important;margin-top:7px!important}
+ .kgf-view-home .kgf-equity-chart{height:140px!important}
+ .kgf-view-home .kgf-recent{padding:10px!important;margin-top:7px!important}
+ .kgf-view-home .kgf-trade{padding:8px 2px!important}
+ .kgf-view-home .kgf-motto{
+   position:relative!important;overflow:hidden!important;margin-top:7px!important;padding:18px 8px 17px 98px!important;
+   min-height:78px!important;text-align:left!important;
+   background:
+     radial-gradient(circle at 42px 40px,rgba(227,170,49,.19),transparent 31px),
+     linear-gradient(105deg,#090a09 0,#100c06 33%,#06090b 100%)!important;
+   border-color:#a36e13!important;
+ }
+ .kgf-view-home .kgf-motto:before{
+   content:"K";position:absolute;left:18px;top:8px;width:55px;height:60px;display:grid;place-items:center;
+   color:#080b0d;font:900 37px Georgia;background:linear-gradient(145deg,#ffe079,#b8750d);
+   clip-path:polygon(10% 0,90% 0,80% 100%,20% 100%);
+   box-shadow:0 0 25px rgba(232,174,47,.12)
+ }
+ .kgf-view-home .kgf-motto b{font-size:12px!important;color:#ead59a!important}
+ .kgf-view-home .kgf-motto span{font-size:6.8px!important;letter-spacing:.13em!important}
+}
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
 Copyright (c) 2013-present, Facebook, Inc.
