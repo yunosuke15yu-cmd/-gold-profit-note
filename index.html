@@ -174,6 +174,15 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-settings-actions button small{margin-top:3px;color:#8395a5;font-size:9px}
  .kgf-settings-actions button:active{background:#0a1720}
  .kgf-appinfo{margin-top:10px}.kgf-appinfo>div:last-child{grid-column:1/-1}
+ .kgf-records{min-width:0;margin-top:10px;padding:13px 10px;border:1px solid #a77a28;border-radius:11px;background:linear-gradient(145deg,#101b24,#050e15)}
+ .kgf-records h3{margin:0 0 10px;color:#e9c36a;font-size:14px;letter-spacing:.07em}
+ .kgf-records-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+ .kgf-record{min-width:0;min-height:83px;padding:10px 9px;border:1px solid #29404a;border-radius:9px;background:#091720}
+ .kgf-record>span{display:block;color:#9fb0bc;font-size:9px;font-weight:800;letter-spacing:.04em;overflow-wrap:anywhere}
+ .kgf-record strong{display:block;margin-top:8px;color:#ebc66f;font-size:17px;line-height:1.2;overflow-wrap:anywhere}
+ .kgf-record strong.gn-positive{color:#34bc82}.kgf-record strong.gn-negative{color:#ef687a}
+ .kgf-record small{display:block;margin-top:5px;color:#91a2ad;font-size:9px;overflow-wrap:anywhere}
+ .kgf-records-note{margin:9px 1px 0;color:#91a2ad;font-size:9px;line-height:1.4}
 }
 
 /* Phase 6 — Home polish only. Five-tab logic untouched. */
@@ -883,6 +892,72 @@ function calendarAmount(value) {
     const abs = Math.abs(Math.round(value));
     const compact = abs >= 10000 ? new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 }).format(abs) : abs.toLocaleString("ja-JP");
     return `${value > 0 ? "+" : value < 0 ? "−" : ""}${compact}`;
+}
+function recordsSummary(metrics, trades) {
+    const rows = (Array.isArray(trades) ? trades : []).map(trade => {
+        const time = trade && jstTradeTime(trade.trade_time);
+        const pnl = trade && Number(trade.net_pnl);
+        return time && Number.isFinite(pnl) ? { ...time, pnl, ticket: String(trade.deal_ticket || "") } : null;
+    }).filter(Boolean).sort((a, b) => a.at - b.at || a.ticket.localeCompare(b.ticket));
+    const totalTrades = metrics ? metrics.daily.reduce((sum, day) => sum + Math.max(0, Math.floor(finiteAmount(day.trades))), 0) : 0;
+    const detailProfit = rows.reduce((sum, row) => sum + row.pnl, 0);
+    const detailComplete = !!metrics && rows.length === totalTrades && Math.abs(detailProfit - finiteAmount(metrics.total)) <= 0.01;
+    const days = new Map(), months = new Map();
+    let streak = 0, maxStreak = 0, streakDate = "", biggestWin = null, biggestLoss = null;
+    for (const row of rows) {
+        const day = days.get(row.date) || { date: row.date, pnl: 0 };
+        day.pnl += row.pnl;
+        days.set(row.date, day);
+        const monthKey = row.date.slice(0, 7);
+        const month = months.get(monthKey) || { key: monthKey, pnl: 0, wins: 0, losses: 0 };
+        month.pnl += row.pnl;
+        if (row.pnl > 0) {
+            month.wins += 1;
+            streak += 1;
+            if (streak > maxStreak) { maxStreak = streak; streakDate = row.date; }
+            if (biggestWin === null || row.pnl > biggestWin.pnl) biggestWin = row;
+        } else if (row.pnl < 0) {
+            month.losses += 1;
+            streak = 0;
+            if (biggestLoss === null || row.pnl < biggestLoss.pnl) biggestLoss = row;
+        }
+        months.set(monthKey, month);
+    }
+    const daySource = detailComplete ? [...days.values()] : metrics ? metrics.daily.filter(day => day.trades > 0) : [];
+    const bestDay = daySource.reduce((best, day) => !best || day.pnl > best.pnl ? day : best, null);
+    const bestMonth = detailComplete ? [...months.values()].reduce((best, month) => !best || month.pnl > best.pnl ? month : best, null) : null;
+    const bestRate = detailComplete ? [...months.values()].filter(month => month.wins + month.losses > 0)
+        .reduce((best, month) => !best || month.wins / (month.wins + month.losses) > best.wins / (best.wins + best.losses) ? month : best, null) : null;
+    return { ready: !!metrics, detailComplete, totalTrades, totalProfit: metrics ? finiteAmount(metrics.total) : 0,
+        bestDay, bestMonth, maxStreak: detailComplete ? maxStreak : null,
+        streakDate, biggestWin: detailComplete ? biggestWin : null,
+        biggestLoss: detailComplete ? biggestLoss : null, bestRate };
+}
+function RecordsCard({ summary }) {
+    const money = value => value === null || value === undefined ? "—" : signed(Math.round(value)) + "円";
+    const monthLabel = key => `${Number(key.slice(0, 4))}年${Number(key.slice(5, 7))}月`;
+    const { ready, detailComplete, bestDay, bestMonth, maxStreak, streakDate,
+        totalTrades, biggestWin, biggestLoss, bestRate, totalProfit } = summary;
+    const items = [
+        ["BEST DAY", money(bestDay && bestDay.pnl), bestDay ? fullDate(bestDay.date) : "—", bestDay && tone(bestDay.pnl)],
+        ["MAX WIN STREAK", maxStreak === null ? "—" : String(maxStreak), streakDate ? fullDate(streakDate) + "まで" : "—", ""],
+        ["BEST MONTH", money(bestMonth && bestMonth.pnl), bestMonth ? monthLabel(bestMonth.key) : "—", bestMonth && tone(bestMonth.pnl)],
+        ["TOTAL TRADES", ready ? totalTrades.toLocaleString("ja-JP") : "—", "決済取引", ""],
+        ["BIGGEST WIN", money(biggestWin && biggestWin.pnl), biggestWin ? fullDate(biggestWin.date) : "—", biggestWin && "gn-positive"],
+        ["BIGGEST LOSS", money(biggestLoss && biggestLoss.pnl), biggestLoss ? fullDate(biggestLoss.date) : "—", biggestLoss && "gn-negative"],
+        ["BEST WIN RATE", bestRate ? (bestRate.wins / (bestRate.wins + bestRate.losses) * 100).toFixed(1) + "%" : "—",
+            bestRate ? monthLabel(bestRate.key) : "—", bestRate && "gn-positive"],
+        ["TOTAL PROFIT", ready ? money(totalProfit) : "—", "全期間の確定損益", ready && tone(totalProfit)],
+    ];
+    return React.createElement("section", { className: "kgf-records", "aria-label": "RECORDS" },
+        React.createElement("h3", null, "🏆 RECORDS"),
+        React.createElement("div", { className: "kgf-records-grid" }, items.map(([label, value, note, color]) =>
+            React.createElement("div", { className: "kgf-record", key: label },
+                React.createElement("span", null, label),
+                React.createElement("strong", { className: "gn-mono " + (color || "") }, value),
+                React.createElement("small", null, note)))),
+        ready && !detailComplete && React.createElement("p", { className: "kgf-records-note" },
+            "連勝・月間記録などは全取引の明細を確認できないため表示していません。"));
 }
 function HomeSummaryCards({ summary }) {
     const { ready, todayPnl, todayCount, monthPnl, goal, progress, ring } = summary;
@@ -1684,6 +1759,8 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div",{className:"kgf-pagehead"},
                     React.createElement("h2",null,"設定"),
                     React.createElement("p",null,"KOMA GOLD 日記・データ管理")),
+                this.state.safeView==="settings" && React.createElement(RecordsCard,{
+                    summary:recordsSummary(this.state.mt5Metrics,this.state.mt5Trades)}),
                 React.createElement("div",{className:"kgf-settings-status"},
                     React.createElement("div",null,React.createElement("span",null,"MT5 LIVE"),React.createElement("strong",{className:"gn-positive"},"● 接続中")),
                     React.createElement("div",null,React.createElement("span",null,"最終同期"),React.createElement("strong",{className:"gn-mono"},s&&s.updated_at?japanTime(s.updated_at):"確認中")),
