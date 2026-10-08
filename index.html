@@ -341,6 +341,37 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-calendar-legend .win i{border-color:#20533d;background:#0a261d}.kgf-calendar-legend .loss i{border-color:#5c2834;background:#2a1218}
  .kgf-analysis-detail{margin:16px 0 5px;color:#edc76a;font-size:13px}
 }
+/* Timing analysis shares one component between desktop and mobile. */
+.kgf-timing{margin:16px 0;padding:16px;border:1px solid rgba(217,183,95,.35);border-radius:14px;background:#07131c;color:#e5edf3;min-width:0}
+.kgf-timing h3{margin:0;color:#efd079;font-size:16px}
+.kgf-timing .kgf-analysis-month{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
+.kgf-timing .kgf-analysis-month button{width:44px;height:44px;border:1px solid #27414e;border-radius:9px;background:#0c1b25;color:#efd079;font-size:22px;cursor:pointer}
+.kgf-timing .kgf-analysis-month strong{font-size:15px}
+.kgf-timing-note{margin:8px 0 12px;color:#9dafbd;font-size:11px;line-height:1.7}
+.kgf-timing-switch{display:flex;gap:4px;padding:4px;border:1px solid #27414e;border-radius:10px;background:#020b11;margin:12px 0}
+.kgf-timing-switch button{flex:1;min-height:44px;border:0;border-radius:7px;background:transparent;color:#a4b4c0;font:inherit;font-size:12px;cursor:pointer}
+.kgf-timing-switch button[aria-pressed="true"]{color:#f2d584;background:#26301f;font-weight:700}
+.kgf-timing button:focus-visible{outline:2px solid #f0c766;outline-offset:2px}
+.kgf-timing-resolution{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#9dafbd;font-size:11px;margin-bottom:12px}
+.kgf-timing-resolution .kgf-timing-switch{margin:0;width:172px;padding:3px}
+.kgf-timing-resolution button{min-height:36px;font-size:10px}
+.kgf-timing-highlights{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
+.kgf-timing-highlight{min-width:0;padding:12px 10px;border:1px solid #27414e;border-radius:10px;background:#0c1b25}
+.kgf-timing-highlight span,.kgf-timing-highlight small{display:block;color:#9dafbd;font-size:10px;line-height:1.6}
+.kgf-timing-highlight strong{display:block;margin:7px 0 3px;font-size:16px;color:#efd079;overflow-wrap:anywhere}
+.kgf-timing-table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.kgf-timing-table caption{text-align:left;color:#c6d5df;font-size:11px;margin:4px 0 10px}
+.kgf-timing-table th,.kgf-timing-table td{padding:12px 5px;border-bottom:1px solid #223742;text-align:right;white-space:nowrap}
+.kgf-timing-table th:first-child{text-align:left}
+.kgf-timing-table thead th{color:#93a9b8;font-size:10px;font-weight:500}
+.kgf-timing-table tbody th{font-size:11px;font-weight:500;color:#c6d5df}
+.kgf-timing-table .kgf-timing-pnl{position:relative;min-width:83px}
+.kgf-timing-bar{position:absolute;right:2px;top:10px;bottom:10px;border-radius:4px;background:rgba(83,208,157,.12);pointer-events:none}
+.kgf-timing-bar.loss{background:rgba(255,101,129,.12)}
+.kgf-timing-pnl strong{position:relative;font-size:12px;font-weight:600}
+.kgf-timing-empty{padding:24px 8px;text-align:center;color:#a3b7c5;font-size:13px;line-height:1.8}
+.kgf-timing-summary{margin:12px 0 0;color:#a3b7c5;font-size:11px;line-height:1.7}
+@media(max-width:375px){.kgf-timing{padding:12px 9px}.kgf-timing-table th,.kgf-timing-table td{padding-left:3px;padding-right:3px}.kgf-timing-table{font-size:11px}.kgf-timing-highlight strong{font-size:14px}}
 </style></head><body><div id="root"></div><noscript>このアプリを使うには、ブラウザでJavaScriptを有効にしてください。</noscript>
 <!-- React / ReactDOM (MIT License)
 Copyright (c) 2013-present, Facebook, Inc.
@@ -893,6 +924,74 @@ function calendarAmount(value) {
     const compact = abs >= 10000 ? new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 }).format(abs) : abs.toLocaleString("ja-JP");
     return `${value > 0 ? "+" : value < 0 ? "−" : ""}${compact}`;
 }
+function timingTradeAnalysis(trades, month, hours = 3) {
+    const span = hours === 1 ? 1 : 3;
+    const bucket = (label, key) => ({ label, key, pnl: 0, trades: 0, wins: 0, losses: 0 });
+    const hourly = Array.from({ length: 24 / span }, (_, index) => {
+        const start = index * span;
+        return bucket(span === 1 ? `${start}時台` : `${start}–${start + span - 1}時`, start);
+    });
+    const weekdays = ["月", "火", "水", "木", "金", "土", "日"].map((day, index) => bucket(`${day}曜日`, index));
+    const hourFormat = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Tokyo", hour: "2-digit", hourCycle: "h23" });
+    let total = 0, count = 0;
+    for (const trade of Array.isArray(trades) ? trades : []) {
+        if (!trade || trade.net_pnl == null || trade.net_pnl === "") continue;
+        const time = jstTradeTime(trade.trade_time), pnl = Number(trade.net_pnl);
+        if (!time || time.date.slice(0, 7) !== month || !Number.isFinite(pnl)) continue;
+        const hour = Number(hourFormat.format(new Date(time.at)));
+        const weekdayIndex = (utcDate(time.date).getUTCDay() + 6) % 7;
+        for (const group of [hourly[Math.floor(hour / span)], weekdays[weekdayIndex]]) {
+            group.pnl += pnl;
+            group.trades += 1;
+            group.wins += Number(pnl > 0);
+            group.losses += Number(pnl < 0);
+        }
+        total += pnl;
+        count += 1;
+    }
+    return { hourly, weekdays, total, count };
+}
+function TradeTimingPanel({ trades, month, hours, mode, syncState, onModeChange, onHoursChange, onMonthChange }) {
+    const result = timingTradeAnalysis(trades, month, hours);
+    const rows = mode === "weekday" ? result.weekdays : result.hourly;
+    const active = rows.filter(row => row.trades);
+    const highest = active.reduce((best, row) => !best || row.pnl > best.pnl ? row : best, null);
+    const busiest = active.reduce((best, row) => !best || row.trades > best.trades ? row : best, null);
+    const maxAbs = Math.max(1, ...rows.map(row => Math.abs(row.pnl)));
+    const e = React.createElement;
+    const choice = (name, value, selected, change) => e("button", { type: "button", "aria-pressed": selected === value, onClick: () => change(value) }, name);
+    const highlight = (label, row, text) => e("div", { className: "kgf-timing-highlight" },
+        e("span", null, label), e("strong", null, row ? row.label : "—"), e("small", null, row ? text(row) : "取引データ待ち"));
+    return e("section", { className: "kgf-timing", "aria-label": "時間帯・曜日別の成績" },
+        e("h3", null, "時間帯・曜日別の成績"),
+        onMonthChange && e("div", { className: "kgf-analysis-month" },
+            e("button", { type: "button", "aria-label": "時間帯分析の前月", onClick: () => onMonthChange(shiftMonth(month, -1)) }, "‹"),
+            e("strong", null, `${Number(month.slice(0, 4))}年${Number(month.slice(5, 7))}月`),
+            e("button", { type: "button", "aria-label": "時間帯分析の翌月", onClick: () => onMonthChange(shiftMonth(month, 1)) }, "›")),
+        e("p", { className: "kgf-timing-note" }, "決済した時刻を日本時間で集計。勝率は損益0円の取引を除いて計算します。"),
+        e("div", { className: "kgf-timing-switch", role: "group", "aria-label": "分析の切り替え" },
+            choice("時間帯", "hour", mode, onModeChange), choice("曜日", "weekday", mode, onModeChange)),
+        mode !== "weekday" && e("div", { className: "kgf-timing-resolution" }, e("span", null, "時間の区切り"),
+            e("div", { className: "kgf-timing-switch", role: "group", "aria-label": "時間帯の区切り" },
+                choice("3時間ごと", 3, hours, onHoursChange), choice("1時間ごと", 1, hours, onHoursChange))),
+        syncState === "loading" ? e("p", { className: "kgf-timing-empty", role: "status" }, "取引明細を読み込んでいます。") :
+        !result.count ? e("p", { className: "kgf-timing-empty", role: "status" }, syncState === "error" ? "取引明細を取得できませんでした。接続後に再試行します。" : "この月には集計できる決済取引がありません。") :
+        e("div", null,
+            e("div", { className: "kgf-timing-highlights" },
+                highlight("損益が最も高い区分", highest, row => `${signed(Math.round(row.pnl))}円 · ${row.trades}件`),
+                highlight("取引が最も多い区分", busiest, row => `${row.trades}件 · 勝率 ${percent(row.wins, row.losses)}`)),
+            e("table", { className: "kgf-timing-table" },
+                e("caption", null, `${Number(month.slice(0, 4))}年${Number(month.slice(5, 7))}月 · ${mode === "weekday" ? "曜日別" : "時間帯別"}（日本時間）`),
+                e("thead", null, e("tr", null, [mode === "weekday" ? "曜日" : "時間帯", "損益", "勝率", "件数"].map(label => e("th", { key: label, scope: "col" }, label)))),
+                e("tbody", null, rows.map(row => e("tr", { key: row.key },
+                    e("th", { scope: "row" }, row.label),
+                    e("td", { className: "kgf-timing-pnl" }, row.trades > 0 && e("span", { className: "kgf-timing-bar " + (row.pnl < 0 ? "loss" : ""), "aria-hidden": "true", style: { width: `${Math.abs(row.pnl) / maxAbs * 95}%` } }),
+                        e("strong", { className: tone(row.pnl) }, row.trades ? `${signed(Math.round(row.pnl))}円` : "—")),
+                    e("td", null, percent(row.wins, row.losses)), e("td", null, `${row.trades}件`))))),
+            e("p", { className: "kgf-timing-summary" }, `合計 ${result.count}件 · ${signed(Math.round(result.total))}円。件数も合わせて比較してください。`)),
+        (trades || []).length >= 500 && e("p", { className: "kgf-timing-note" }, "取得済みの直近500件を集計しています。古い取引が含まれない場合があります。"),
+        syncState === "error" && result.count > 0 && e("p", { className: "kgf-timing-note", role: "status" }, "同期が停止しているため、前回取得した明細を表示しています。"));
+}
 function recordsSummary(metrics, trades) {
     const rows = (Array.isArray(trades) ? trades : []).map(trade => {
         const time = trade && jstTradeTime(trade.trade_time);
@@ -1405,7 +1504,7 @@ class GoldProfitNote extends React.Component {
             theme: theme.theme, tab: "daily", date: mt5Today(), pnlInput: "", note: "",
             editing: null, formError: "", formErrorField: null, deleteTarget: null,
             notice: "", transfer: null, importText: "", importMode: "merge", importPreview: null,
-            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), syncState: "loading",
+            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), timingMode: "hour", timingHours: 3, syncState: "loading",
         };
     }
     componentDidMount() {
@@ -1689,6 +1788,7 @@ class GoldProfitNote extends React.Component {
                 card("負け日数", result.lossDays + "日", "gn-negative"),
                 card("Profit Factor", pf),
                 card("最大DD", result.maxDD ? "−" + Math.round(result.maxDD).toLocaleString("ja-JP") + "円" : "0円", "gn-negative")),
+            this.renderTradeTiming(false),
             React.createElement("div", { className: "kgf-calendar" },
                 React.createElement("h3", null, "月間カレンダー"),
                 React.createElement("div", { className: "kgf-calendar-grid" },
@@ -1704,6 +1804,15 @@ class GoldProfitNote extends React.Component {
                 card("最大損失", result.maxLoss ? "−" + Math.round(result.maxLoss).toLocaleString("ja-JP") + "円" : "0円", "gn-negative")),
             React.createElement("h3", { className: "kgf-analysis-detail" }, "損益推移"),
             React.createElement("div", { className: "kgf-analysis-chart" }, React.createElement(ProfitChart, { daily: result.daily })));
+    }
+    renderTradeTiming(showMonthControls = true) {
+        return React.createElement(TradeTimingPanel, {
+            trades: this.state.mt5Trades, month: this.state.analysisMonth,
+            hours: this.state.timingHours, mode: this.state.timingMode, syncState: this.state.syncState,
+            onModeChange: timingMode => this.setState({ timingMode }),
+            onHoursChange: timingHours => this.setState({ timingHours }),
+            onMonthChange: showMonthControls ? analysisMonth => this.setState({ analysisMonth }) : null,
+        });
     }
     renderKomaDashboard(data, period) {
         const s=this.state.mt5Status, tr=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
@@ -1924,6 +2033,7 @@ class GoldProfitNote extends React.Component {
                             item("現在の連勝 / 連敗",curW?`${curW}連勝`:curL?`${curL}連敗`:"—"),
                             item("最大連勝 / 連敗",`${maxW} / ${maxL}`)));
                 })(),
+                React.createElement("section", { className: "gn-card gn-timing-card" }, this.renderTradeTiming()),
                 this.renderRecentTrades(),
                 React.createElement("section", { className: "gn-card gn-summary", "aria-label": "\u53CE\u652F\u306E\u307E\u3068\u3081" },
                     React.createElement("div", { className: "gn-summary-top" },
