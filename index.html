@@ -1899,7 +1899,7 @@ class GoldProfitNote extends React.Component {
                     React.createElement("div",null,React.createElement("span",null,"データ"),React.createElement("strong",null,"HFM MT5 × Supabase")),
                     React.createElement("div",null,React.createElement("span",null,"XAUUSD"),React.createElement("strong",null,"リアルチャート同期")))),
             React.createElement("section",{className:"kgf-history-safe"},
-                React.createElement("div",{className:"kgf-pagehead"},React.createElement("h2",null,"取引履歴"),React.createElement("p",null,"MT5から同期された直近の取引")),
+                React.createElement("div",{className:"kgf-pagehead"},React.createElement("h2",null,"取引履歴"),React.createElement("p",null,"決済済み取引 · BUY/SELLは建玉の方向")),
                 React.createElement("div",{className:"kgf-history-head"},React.createElement("span",null,"日時"),React.createElement("span",null,"売買"),React.createElement("span",null,"Lot"),React.createElement("span",null,"損益")),
                 allTrades.slice(0,80).map((x,i)=>React.createElement("div",{className:"kgf-history-row",key:String(x.deal_ticket||i)},
                     React.createElement("span",{className:"gn-mono"},String(x.trade_time||"").slice(5,16).replace("T"," ")),
