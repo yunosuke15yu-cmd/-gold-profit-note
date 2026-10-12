@@ -342,6 +342,8 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-analysis-detail{margin:16px 0 5px;color:#edc76a;font-size:13px}
 }
 /* Timing analysis shares one component between desktop and mobile. */
+.kgf-sync-off{border-color:#9a7134!important}.kgf-sync-off .kgf-live i{background:#e8ae52!important;box-shadow:none!important}.kgf-sync-off .kgf-live b{color:#f2c46e}
+.kgf-sync-warning{margin:8px 0;padding:11px 12px;border:1px solid #9a7134;border-radius:9px;background:#302514;color:#f5d89f;font-size:12px;line-height:1.7}
 .kgf-timing{margin:16px 0;padding:16px;border:1px solid rgba(217,183,95,.35);border-radius:14px;background:#07131c;color:#e5edf3;min-width:0}
 .kgf-timing h3{margin:0;color:#efd079;font-size:16px}
 .kgf-timing .kgf-analysis-month{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
@@ -682,6 +684,18 @@ function japanTime(value) {
     }).formatToParts(new Date(value));
     const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
     return `${p.month}/${p.day} ${p.hour}:${p.minute}`;
+}
+function mt5SyncHealth(status, syncState, now = Date.now()) {
+    if (syncState === "error") return { fresh: false, label: "MT5 通信エラー", message: "データを取得できません。ネット接続を確認してください。表示中の数値は前回の取得値です。" };
+    if (!status) return { fresh: false, label: "MT5 確認中", message: "" };
+    const updated = new Date(status.updated_at || "").getTime();
+    const age = now - updated;
+    if (!Number.isFinite(updated) || age < -60000) return { fresh: false, label: "MT5 同期確認", message: "最終同期時刻を確認できません。表示中の数値は最後に取得した値です。" };
+    const fresh = Number.isFinite(updated) && age >= -60000 && age <= 180000;
+    return fresh ? { fresh: true, label: "MT5 LIVE", message: "" } : {
+        fresh: false, label: "MT5 同期停止",
+        message: "3分以上更新されていません。PCでHFM MT5を起動し、ネット接続を確認してください。表示中の数値は最終同期時点のものです。"
+    };
 }
 function safeTimestamp(value, fallback) {
     if (value === undefined)
@@ -1816,6 +1830,7 @@ class GoldProfitNote extends React.Component {
     }
     renderKomaDashboard(data, period) {
         const s=this.state.mt5Status, tr=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
+        const syncHealth=mt5SyncHealth(s,this.state.syncState);
         const total=Number(data.total)||0, wins=Number(data.wins)||0, losses=Number(data.losses)||0;
         const rate=(wins+losses)?wins/(wins+losses)*100:0;
         const allTrades=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
@@ -1842,7 +1857,8 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div",{className:"kgf-logo"},"K"),
                 React.createElement("div",{className:"kgf-brand"},React.createElement("h1",null,"KOMA GOLD 日記"),React.createElement("p",null,"TRADE · LOG · ANALYZE · IMPROVE")),
                 React.createElement("em",null,"継続は、最強の武器。")),
-            React.createElement("div",{className:"kgf-livebar"},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,"MT5 LIVE"),React.createElement("span",null,"HFM · XAUUSD")),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
+            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,"HFM · XAUUSD")),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
+            syncHealth.message && React.createElement("p",{className:"kgf-sync-warning",role:"status"},syncHealth.message),
             React.createElement("section",{className:"kgf-account"},
                 metric("口座残高",s?Math.round(Number(s.balance)||0).toLocaleString("ja-JP")+"円":"—",""),
                 metric("有効証拠金",s?Math.round(Number(s.equity)||0).toLocaleString("ja-JP")+"円":"—",""),
@@ -1938,15 +1954,15 @@ class GoldProfitNote extends React.Component {
                     React.createElement("p", null, warning)),
                 (() => {
                     const s=this.state.mt5Status, tr=this.state.mt5Trades||[];
-                    const updated=s&&s.updated_at?new Date(s.updated_at).getTime():0;
-                    const fresh=updated>0&&(Date.now()-updated<60000);
+                    const syncHealth=mt5SyncHealth(s,this.state.syncState), fresh=syncHealth.fresh;
                     const today=mt5Today(), todayTrades=tr.filter(x=>x&&x.trade_date===today);
                     const todayPnl=todayTrades.reduce((a,x)=>a+(Number(x.net_pnl)||0),0);
                     const item=(label,value,cls)=>React.createElement("div",{className:"gn-live-item"},React.createElement("p",null,label),React.createElement("div",{className:`gn-live-value gn-mono ${cls||""}`},value));
                     return React.createElement("section",{className:"gn-card gn-live","aria-label":"MT5 LIVE"},
                         React.createElement("div",{className:"gn-live-head"},
                             React.createElement("div",null,React.createElement("h2",null,"MT5 LIVE"),React.createElement("p",{className:"gn-live-sub"},s&&s.updated_at?`最終同期 ${japanTime(s.updated_at)}`:"同期データを確認中")),
-                            React.createElement("span",{className:`gn-live-badge ${fresh?"":"off"}`},React.createElement("i",{className:"gn-live-dot"}),this.state.syncState==="error"?"通信エラー":fresh?"接続中":"更新待ち")),
+                            React.createElement("span",{className:`gn-live-badge ${fresh?"":"off"}`},React.createElement("i",{className:"gn-live-dot"}),fresh?"接続中":syncHealth.label.replace("MT5 ",""))),
+                        syncHealth.message && React.createElement("p",{className:"kgf-sync-warning",role:"status"},syncHealth.message),
                         React.createElement("div",{className:"gn-live-grid"},
                             item("残高",s?`${signed(Math.round(Number(s.balance)||0))}円`:"—"),
                             item("有効証拠金",s?`${signed(Math.round(Number(s.equity)||0))}円`:"—"),
