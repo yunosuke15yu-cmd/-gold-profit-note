@@ -344,10 +344,6 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
 /* Timing analysis shares one component between desktop and mobile. */
 .kgf-sync-off{border-color:#9a7134!important}.kgf-sync-off .kgf-live i{background:#e8ae52!important;box-shadow:none!important}.kgf-sync-off .kgf-live b{color:#f2c46e}
 .kgf-sync-warning{margin:8px 0;padding:11px 12px;border:1px solid #9a7134;border-radius:9px;background:#302514;color:#f5d89f;font-size:12px;line-height:1.7}
-.gn-account-picker,.kgf-account-picker{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;margin:8px 0 12px;border:1px solid #7e642d;border-radius:10px;background:#07131c;color:#d9c68d;font-size:12px}
-.gn-account-picker select,.kgf-account-picker select{max-width:65%;min-height:40px;border:1px solid #7e642d;border-radius:8px;padding:5px 30px 5px 12px;background:#111f2b;color:#f4d786;font:inherit;font-weight:700;cursor:pointer}
-.gn-account-picker select:focus-visible,.kgf-account-picker select:focus-visible{outline:2px solid #f0c766;outline-offset:2px}
-@media(max-width:700px){.gn-account-picker{display:none}.kgf-account-picker{margin:7px 0;font-size:11px}}
 .kgf-timing{margin:16px 0;padding:16px;border:1px solid rgba(217,183,95,.35);border-radius:14px;background:#07131c;color:#e5edf3;min-width:0}
 .kgf-timing h3{margin:0;color:#efd079;font-size:16px}
 .kgf-timing .kgf-analysis-month{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
@@ -626,16 +622,15 @@ return sg}"object"===typeof exports&&"undefined"!==typeof module?module.exports=
 const Fragment = React.Fragment || (props => props.children || null);
 const STORAGE_KEY = "gold-profit-note.records.v1";
 const DEFAULT_ACCOUNT_ID = "hfm-5620";
-const ACCOUNT_SELECTION_KEY = "gold-profit-note.account.v1";
 const DEFAULT_ACCOUNTS = [
     { id: "hfm-5620", label: "HFM · 5620", currency: "JPY", symbol: "XAUUSD" },
     { id: "hfm-4597", label: "HFM · 4597", currency: "JPY", symbol: "XAUUSDx" },
 ];
 function accountStorageKey(id) { return id === DEFAULT_ACCOUNT_ID ? STORAGE_KEY : `${STORAGE_KEY}.account.${id}`; }
 function loadSelectedAccount() {
-    try { const id = window.localStorage.getItem(ACCOUNT_SELECTION_KEY); return DEFAULT_ACCOUNTS.some(a => a.id === id) ? id : DEFAULT_ACCOUNT_ID; }
-    catch (_) { return DEFAULT_ACCOUNT_ID; }
+    return "all";
 }
+function tradeKey(trade, fallback) { return `${trade.account_id || DEFAULT_ACCOUNT_ID}:${trade.deal_ticket || trade.trade_time || fallback}`; }
 const THEME_KEY = "gold-profit-note.theme.v1";
 const MAX_ROWS = 20000;
 const MAX_NOTE = 2000;
@@ -703,6 +698,13 @@ function japanTime(value) {
 function mt5SyncHealth(status, syncState, now = Date.now()) {
     if (syncState === "error") return { fresh: false, label: "MT5 通信エラー", message: "データを取得できません。ネット接続を確認してください。表示中の数値は前回の取得値です。" };
     if (!status) return { fresh: false, label: "MT5 確認中", message: "" };
+    if (Array.isArray(status.account_statuses)) {
+        const stale = status.account_statuses.filter(account => {
+            const at = Date.parse(account.updated_at || "");
+            return !Number.isFinite(at) || now - at > 180000 || now - at < -60000;
+        });
+        if (stale.length) return { fresh: false, label: "MT5 一部同期停止", message: `${stale.map(a => a.label).join("・")}の更新が止まっています。対応するHFM MT5を起動してください。合計には各口座の最終同期時点の数値を含みます。` };
+    }
     const updated = new Date(status.updated_at || "").getTime();
     const age = now - updated;
     if (!Number.isFinite(updated) || age < -60000) return { fresh: false, label: "MT5 同期確認", message: "最終同期時刻を確認できません。表示中の数値は最後に取得した値です。" };
@@ -808,6 +810,19 @@ function loadInitial(accountId = DEFAULT_ACCOUNT_ID) {
         if (typeof window === "undefined")
             return { records: initialRecords(), savedAt, needsSave: false, blocked: false, warning: "", raw: null };
         raw = window.localStorage.getItem(accountStorageKey(accountId));
+        if (raw === null && accountId === "all") {
+            const profiles = DEFAULT_ACCOUNTS.map(account => ({ account, initial: loadInitial(account.id) }));
+            const byDate = new Map();
+            profiles.forEach(({ account, initial }) => initial.records.forEach(row => {
+                const old = byDate.get(row.date) || { ...row, pnl: 0, note: "" };
+                old.pnl += row.pnl;
+                if (row.note) old.note = [old.note, `${account.label}: ${row.note}`].filter(Boolean).join(" / ").slice(0, MAX_NOTE);
+                byDate.set(row.date, old);
+            }));
+            const records = [...byDate.values()].sort((a,b) => a.date.localeCompare(b.date));
+            checkSumSafety(records);
+            return { records, savedAt, needsSave: true, blocked: false, warning: profiles.some(p=>p.initial.blocked) ? "一部の口座の保存データを読み取れません。元データは各口座の保存領域に残しています。" : "", raw: null };
+        }
         if (raw === null)
             return { records: initialRecords(), savedAt, needsSave: true, blocked: false, warning: "", raw: null };
         const data = JSON.parse(raw);
@@ -1473,7 +1488,7 @@ class GoldProfitNote extends React.Component {
         this.previewImport = () => {
             try {
                 const preview = readImport(this.state.importText);
-                if (preview.accountId && preview.accountId !== this.activeAccountId) throw new Error("別の口座のデータです。該当する口座に切り替えてから読み込んでください。");
+                if (preview.accountId && preview.accountId !== this.activeAccountId) throw new Error("口座別のバックアップです。合算用に書き出したバックアップを読み込んでください。");
                 this.setState({ importPreview: preview, importError: "" });
             }
             catch (error) {
@@ -1526,19 +1541,6 @@ class GoldProfitNote extends React.Component {
                 this.setState({ syncState: "error" });
                 if (!silent) this.notify("MT5との同期に失敗しました。しばらくしてから再試行します。");
             }
-        };
-        this.switchAccount = accountId => {
-            if (accountId === this.activeAccountId || !this.state.accounts.some(a => a.id === accountId)) return;
-            this.activeAccountId = accountId;
-            ++this.syncRequestId;
-            const initial = loadInitial(accountId);
-            this.initial = initial;
-            this.storageBlocked = initial.blocked;
-            try { window.localStorage.setItem(ACCOUNT_SELECTION_KEY, accountId); } catch (_) {}
-            this.setState({ accountId, records: initial.records, savedAt: initial.savedAt, warning: initial.warning,
-                mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], syncState: "loading",
-                editing: null, date: mt5Today(), pnlInput: "", note: "", formError: "", formErrorField: null,
-                deleteTarget: null, importPreview: null, importText: "", importError: "", notice: "" }, () => this.syncFromMt5(true));
         };
         const initial = loadInitial(this.activeAccountId);
         const theme = loadTheme();
@@ -1606,7 +1608,7 @@ class GoldProfitNote extends React.Component {
                 const d=new Date(x.trade_time);
                 let when="—";
                 if(Number.isFinite(d.getTime())) when=new Intl.DateTimeFormat("ja-JP",{timeZone:"Asia/Tokyo",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(d);
-                return React.createElement("div",{className:"gn-trade-card",key:String(x.deal_ticket||x.trade_time)},
+                return React.createElement("div",{className:"gn-trade-card",key:tradeKey(x)},
                     React.createElement("div",{className:"gn-trade-top"},
                         React.createElement("div",{className:"gn-trade-left"},
                             React.createElement("span",{className:"gn-side-badge "+(side==="BUY"?"buy":"sell")},side||"—"),
@@ -1650,7 +1652,7 @@ class GoldProfitNote extends React.Component {
             return React.createElement("section",{className:"gn-card gn-xau-card"},
                 React.createElement("div",{className:"gn-xau-head"},React.createElement("div",null,React.createElement("p",{className:"gn-perf-kicker"},"REAL XAUUSD"),React.createElement("h2",null,"ゴールドチャート"),React.createElement("div",{className:"gn-xau-price gn-mono"},last.toFixed(2),React.createElement("span",{className:tone(chg)},(chg>=0?"+":"")+chg.toFixed(2)+" ("+(pct>=0?"+":"")+pct.toFixed(2)+"%)"))),React.createElement("div",{className:"gn-xau-tools"},React.createElement("span",{className:"gn-xau-live"},"● MT5"),React.createElement("div",{className:"gn-xau-tfs"},React.createElement("button",{type:"button",className:"gn-xau-tf "+(this.state.chartTf==="M1"?"active":""),onClick:()=>this.setChartTf("M1")},"M1"),React.createElement("button",{type:"button",className:"gn-xau-tf "+(this.state.chartTf==="M5"?"active":""),onClick:()=>this.setChartTf("M5")},"M5"),React.createElement("button",{type:"button",className:"gn-xau-tf "+(this.state.chartTf==="M15"?"active":""),onClick:()=>this.setChartTf("M15")},"15M"),React.createElement("button",{type:"button",className:"gn-xau-tf "+(this.state.chartTf==="H1"?"active":""),onClick:()=>this.setChartTf("H1")},"H1")))),
                 React.createElement("div",{className:"kgv4-meta"},React.createElement("span",{className:"e20"},"EMA20 "+ema20[ema20.length-1].toFixed(2)),React.createElement("span",{className:"e50"},"EMA50 "+ema50[ema50.length-1].toFixed(2)),React.createElement("span",{className:"ohlc"},"O "+Number(latest.open).toFixed(2)+"  H "+Number(latest.high).toFixed(2)+"  L "+Number(latest.low).toFixed(2)+"  C "+last.toFixed(2))),React.createElement("div",{className:"gn-xau-chart"},React.createElement("svg",{viewBox:`0 0 ${W} ${H}`,preserveAspectRatio:"none"},grid,candles,React.createElement("path",{d:emaPath(ema20),fill:"none",stroke:"#f2b62d",strokeWidth:"2"}),React.createElement("path",{d:emaPath(ema50),fill:"none",stroke:"#45aaff",strokeWidth:"2"}),React.createElement("line",{x1:L,x2:W-R,y1:py,y2:py,stroke:"#e6c87a",strokeWidth:"1",strokeDasharray:"5 5"}),React.createElement("rect",{x:W-R+3,y:py-10,width:56,height:20,rx:"5",fill:"#8b713b"}),React.createElement("text",{x:W-R+31,y:py+4,textAnchor:"middle",fill:"#fff3c7",fontSize:"11",fontWeight:"700"},last.toFixed(2)))),
-                React.createElement("div",{className:"gn-xau-foot"},React.createElement("span",null,"HFM MT5から同期"),React.createElement("span",null,(this.state.chartTf||"M15")+"・"+all.length+"本保存")));
+                React.createElement("div",{className:"gn-xau-foot"},React.createElement("span",null,"代表口座のゴールド価格"),React.createElement("span",null,(this.state.chartTf||"M15")+"・"+all.length+"本保存")));
         } catch(e) { return React.createElement("section",{className:"gn-card gn-xau-card"},React.createElement("h2",null,"ゴールドチャート"),React.createElement("div",{className:"gn-xau-empty"},"チャートを表示できませんでした。")); }
     }
     renderDaily(data) {
@@ -1868,17 +1870,9 @@ class GoldProfitNote extends React.Component {
             onMonthChange: showMonthControls ? analysisMonth => this.setState({ analysisMonth }) : null,
         });
     }
-    renderAccountSelector(mobile = false) {
-        const id = mobile ? "kgf-account-choice" : "gn-account-choice";
-        return React.createElement("div", { className: mobile ? "kgf-account-picker" : "gn-account-picker" },
-            React.createElement("label", { htmlFor: id }, "表示する口座"),
-            React.createElement("select", { id, value: this.state.accountId, onChange: event => this.switchAccount(event.target.value) },
-                this.state.accounts.map(account => React.createElement("option", { key: account.id, value: account.id }, account.label))));
-    }
     renderKomaDashboard(data, period) {
         const s=this.state.mt5Status, tr=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
         const syncHealth=mt5SyncHealth(s,this.state.syncState);
-        const selectedAccount=this.state.accounts.find(a=>a.id===this.state.accountId)||DEFAULT_ACCOUNTS[0];
         const total=Number(data.total)||0, wins=Number(data.wins)||0, losses=Number(data.losses)||0;
         const rate=(wins+losses)?wins/(wins+losses)*100:0;
         const allTrades=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
@@ -1905,8 +1899,7 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div",{className:"kgf-logo"},"K"),
                 React.createElement("div",{className:"kgf-brand"},React.createElement("h1",null,"KOMA GOLD 日記"),React.createElement("p",null,"TRADE · LOG · ANALYZE · IMPROVE")),
                 React.createElement("em",null,"継続は、最強の武器。")),
-            this.renderAccountSelector(true),
-            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,"HFM · "+selectedAccount.symbol)),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
+            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,`HFM · ${this.state.accounts.length}口座合算`)),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
             syncHealth.message && React.createElement("p",{className:"kgf-sync-warning",role:"status"},syncHealth.message),
             React.createElement("section",{className:"kgf-account"},
                 metric("口座残高",s?Math.round(Number(s.balance)||0).toLocaleString("ja-JP")+"円":"—",""),
@@ -1927,7 +1920,7 @@ class GoldProfitNote extends React.Component {
                     React.createElement("path",{d:area,fill:"url(#kgfArea)"}),React.createElement("path",{d:line,fill:"none",stroke:"#e9b52f",strokeWidth:"3"})):React.createElement("div",{className:"kgf-empty"},"収支データ待ち"))),
             React.createElement("section",{className:"kgf-recent"},
                 React.createElement("div",{className:"kgf-title"},React.createElement("h2",null,"最近の取引"),React.createElement("span",null,"直近5件")),
-                tr.slice(0,5).map((x,i)=>React.createElement("div",{className:"kgf-trade",key:String(x.deal_ticket||i)},React.createElement("span",{className:"gn-mono"},String(x.trade_time||"").slice(11,16)),React.createElement("b",{className:String(x.side||"").toUpperCase()==="BUY"?"buy":"sell"},String(x.side||"—").toUpperCase()),React.createElement("span",{className:"gn-mono"},Number(x.volume||0).toFixed(2)),React.createElement("strong",{className:"gn-mono "+tone(Number(x.net_pnl)||0)},signed(Math.round(Number(x.net_pnl)||0))+"円")))),
+                tr.slice(0,5).map((x,i)=>React.createElement("div",{className:"kgf-trade",key:tradeKey(x,i)},React.createElement("span",{className:"gn-mono"},String(x.trade_time||"").slice(11,16)),React.createElement("b",{className:String(x.side||"").toUpperCase()==="BUY"?"buy":"sell"},String(x.side||"—").toUpperCase()),React.createElement("span",{className:"gn-mono"},Number(x.volume||0).toFixed(2)),React.createElement("strong",{className:"gn-mono "+tone(Number(x.net_pnl)||0)},signed(Math.round(Number(x.net_pnl)||0))+"円")))),
             React.createElement("div",{className:"kgf-motto"},React.createElement("b",null,"小さな積み上げが、大きな結果をつくる。"),React.createElement("span",null,"SMALL STEPS MAKE BIG RESULTS.")),
             React.createElement("section",{className:"kgf-settings-safe"},
                 React.createElement("div",{className:"kgf-pagehead"},
@@ -1950,7 +1943,7 @@ class GoldProfitNote extends React.Component {
             React.createElement("section",{className:"kgf-history-safe"},
                 React.createElement("div",{className:"kgf-pagehead"},React.createElement("h2",null,"取引履歴"),React.createElement("p",null,"決済済み取引 · BUY/SELLは建玉の方向")),
                 React.createElement("div",{className:"kgf-history-head"},React.createElement("span",null,"日時"),React.createElement("span",null,"売買"),React.createElement("span",null,"Lot"),React.createElement("span",null,"損益")),
-                allTrades.slice(0,80).map((x,i)=>React.createElement("div",{className:"kgf-history-row",key:String(x.deal_ticket||i)},
+                allTrades.slice(0,80).map((x,i)=>React.createElement("div",{className:"kgf-history-row",key:tradeKey(x,i)},
                     React.createElement("span",{className:"gn-mono"},String(x.trade_time||"").slice(5,16).replace("T"," ")),
                     React.createElement("b",{className:String(x.side||"").toUpperCase()==="BUY"?"buy":"sell"},String(x.side||"—").toUpperCase()),
                     React.createElement("span",{className:"gn-mono"},Number(x.volume||0).toFixed(2)),
@@ -1977,14 +1970,13 @@ class GoldProfitNote extends React.Component {
         return React.createElement("div", { className: "gn-app", "data-theme": theme },
             React.createElement("style", null, CSS),
             React.createElement("main", { className: "gn-shell" },
-                this.renderAccountSelector(false),
                 this.renderKomaDashboard(data, period),
                 React.createElement("header", { className: "gn-header" },
                     React.createElement("div", { className: "gn-brand" },
                         React.createElement("div", { className: "gn-brand-icon" },
                             React.createElement(Icon, { name: "book", size: 24 })),
                         React.createElement("div", null,
-                            React.createElement("p", { className: "gn-eyebrow" }, "XAUUSD \u30FB HFM MT5"),
+                            React.createElement("p", { className: "gn-eyebrow" }, "HFM MT5 · 2口座合算"),
                             React.createElement("h1", null, "\u30B4\u30FC\u30EB\u30C9\u53CE\u652F\u30CE\u30FC\u30C8"))),
                     React.createElement("div", { className: "gn-header-right" },
                         React.createElement("p", { className: "gn-updated" },

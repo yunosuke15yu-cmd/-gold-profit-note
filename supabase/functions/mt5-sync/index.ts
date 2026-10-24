@@ -26,6 +26,36 @@ function prepareUpload(body,account,auth,now=new Date().toISOString()) {
  if(body.status){const s=body.status;result.status={account_id:account.id,id:1,balance:number(s.balance),equity:number(s.equity),floating_pnl:number(s.floatingPnl),open_positions:integer(s.openPositions),updated_at:now};}
  return result;
 }
+async function readAccount(sb,account,tf) {
+ const id=account.id;
+ const [d,s,t,c]=await Promise.all([
+  sb.from("daily_pnl").select("*").eq("account_id",id).order("trade_date"),
+  sb.from("mt5_status").select("*").eq("account_id",id).eq("id",1).maybeSingle(),
+  sb.from("mt5_trades").select("*").eq("account_id",id).order("trade_time",{ascending:false}).order("deal_ticket",{ascending:false}).limit(500),
+  sb.from("xau_candles").select("*").eq("account_id",id).eq("symbol",account.symbol).eq("timeframe",tf).order("candle_time",{ascending:false}).limit(120)
+ ]);
+ if(d.error||s.error||t.error||c.error)throw new Error("Data read failed");
+ return {daily:d.data||[],status:s.data,trades:t.data||[],candles:[...(c.data||[])].reverse()};
+}
+function combineAccounts(accounts,results,tf) {
+ const days=new Map(),sum=(xs,key)=>xs.reduce((total,row)=>total+(Number(row&&row[key])||0),0);
+ for(const result of results)for(const row of result.daily){
+  const day=days.get(row.trade_date)||{account_id:"all",trade_date:row.trade_date,pnl:0,trades:0,wins:0,losses:0,source:"mt5",updated_at:row.updated_at};
+  for(const key of ["pnl","trades","wins","losses"])day[key]+=Number(row[key])||0;
+  if(Date.parse(row.updated_at)>Date.parse(day.updated_at))day.updated_at=row.updated_at;
+  days.set(row.trade_date,day);
+ }
+ const statuses=results.map(r=>r.status),timestamps=statuses.map(s=>s&&s.updated_at);
+ const complete=timestamps.every(t=>t&&Number.isFinite(Date.parse(t)));
+ const oldest=complete?timestamps.reduce((a,b)=>Date.parse(a)<Date.parse(b)?a:b):null;
+ const status={id:1,account_id:"all",balance:sum(statuses,"balance"),equity:sum(statuses,"equity"),floating_pnl:sum(statuses,"floating_pnl"),open_positions:sum(statuses,"open_positions"),updated_at:oldest,
+  account_statuses:accounts.map((a,i)=>({id:a.id,label:a.label,updated_at:timestamps[i]||null}))};
+ const trades=results.flatMap(r=>r.trades).sort((a,b)=>Date.parse(b.trade_time)-Date.parse(a.trade_time)||Number(b.deal_ticket)-Number(a.deal_ticket)||String(a.account_id).localeCompare(String(b.account_id))).slice(0,500);
+ // Price candles represent one gold market; prices are never added together.
+ const chartIndex=results.findIndex(r=>r.candles.length>0),chart=chartIndex<0?null:results[chartIndex];
+ return {ok:true,accountId:"all",account:{id:"all",label:`HFM ${accounts.length}口座合算`,currency:"JPY",symbol:chartIndex<0?"XAUUSD":accounts[chartIndex].symbol},accounts,
+  daily:[...days.values()].sort((a,b)=>a.trade_date.localeCompare(b.trade_date)),status,trades,candles:chart?chart.candles:[],chartAccountId:chartIndex<0?null:accounts[chartIndex].id,timeframe:tf};
+}
 async function handleRequest(req,sb) {
  if(req.method==="OPTIONS")return new Response("ok",{headers:HEADERS});
  try {
@@ -34,16 +64,13 @@ async function handleRequest(req,sb) {
    if(!["M1","M5","M15","H1"].includes(tf))return reply({ok:false,error:"Invalid timeframe"},400);
    const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order").order("sort_order");
    if(error)throw error;
+   if(accountId==="all"){
+    const results=await Promise.all(accounts.map(a=>readAccount(sb,a,tf)));
+    return reply(combineAccounts(accounts,results,tf));
+   }
    const account=accounts.find(a=>a.id===accountId);
    if(!account)return reply({ok:false,error:"Unknown account"},404);
-   const [d,s,t,c]=await Promise.all([
-    sb.from("daily_pnl").select("*").eq("account_id",accountId).order("trade_date"),
-    sb.from("mt5_status").select("*").eq("account_id",accountId).eq("id",1).maybeSingle(),
-    sb.from("mt5_trades").select("*").eq("account_id",accountId).order("trade_time",{ascending:false}).order("deal_ticket",{ascending:false}).limit(500),
-    sb.from("xau_candles").select("*").eq("account_id",accountId).eq("symbol",account.symbol).eq("timeframe",tf).order("candle_time",{ascending:false}).limit(120)
-   ]);
-   if(d.error||s.error||t.error||c.error)throw new Error("Data read failed");
-   return reply({ok:true,accounts,accountId,account,daily:d.data,status:s.data,trades:t.data,candles:[...(c.data||[])].reverse(),timeframe:tf});
+   return reply({ok:true,accounts,accountId,account,...await readAccount(sb,account,tf),timeframe:tf});
   }
   if(req.method==="POST"){
    const key=req.headers.get("x-sync-key")||"";

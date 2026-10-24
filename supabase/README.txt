@@ -1,8 +1,12 @@
 Account-scoped MT5 sync
 
-functions/mt5-sync/index.ts is the deployed Edge Function. Browser GET requests
-select an account with ?account=<id>&tf=M15. Omitting account keeps the original
-account as the default. Upload credentials resolve to exactly one account;
+functions/mt5-sync/index.ts is the deployed Edge Function. The app requests
+?account=all&tf=M15 and displays combined daily P/L, balances, equity, positions
+and a single chronological trade history. Price candles come from one
+representative gold market and are never summed. The oldest account sync time
+and per-account freshness metadata prevent a partial outage from showing LIVE.
+Scoped ?account=<id> reads remain available for verification. Omitting account
+keeps the original API default for compatibility. Upload credentials resolve to exactly one account;
 source login/server/currency and trade symbols must match that account.
 
 Database records in daily_pnl, mt5_status, mt5_trades and xau_candles use
