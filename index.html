@@ -344,6 +344,10 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
 /* Timing analysis shares one component between desktop and mobile. */
 .kgf-sync-off{border-color:#9a7134!important}.kgf-sync-off .kgf-live i{background:#e8ae52!important;box-shadow:none!important}.kgf-sync-off .kgf-live b{color:#f2c46e}
 .kgf-sync-warning{margin:8px 0;padding:11px 12px;border:1px solid #9a7134;border-radius:9px;background:#302514;color:#f5d89f;font-size:12px;line-height:1.7}
+.gn-account-picker,.kgf-account-picker{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;margin:8px 0 12px;border:1px solid #7e642d;border-radius:10px;background:#07131c;color:#d9c68d;font-size:12px}
+.gn-account-picker select,.kgf-account-picker select{max-width:65%;min-height:40px;border:1px solid #7e642d;border-radius:8px;padding:5px 30px 5px 12px;background:#111f2b;color:#f4d786;font:inherit;font-weight:700;cursor:pointer}
+.gn-account-picker select:focus-visible,.kgf-account-picker select:focus-visible{outline:2px solid #f0c766;outline-offset:2px}
+@media(max-width:700px){.gn-account-picker{display:none}.kgf-account-picker{margin:7px 0;font-size:11px}}
 .kgf-timing{margin:16px 0;padding:16px;border:1px solid rgba(217,183,95,.35);border-radius:14px;background:#07131c;color:#e5edf3;min-width:0}
 .kgf-timing h3{margin:0;color:#efd079;font-size:16px}
 .kgf-timing .kgf-analysis-month{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
@@ -621,6 +625,17 @@ return sg}"object"===typeof exports&&"undefined"!==typeof module?module.exports=
  */
 const Fragment = React.Fragment || (props => props.children || null);
 const STORAGE_KEY = "gold-profit-note.records.v1";
+const DEFAULT_ACCOUNT_ID = "hfm-5620";
+const ACCOUNT_SELECTION_KEY = "gold-profit-note.account.v1";
+const DEFAULT_ACCOUNTS = [
+    { id: "hfm-5620", label: "HFM · 5620", currency: "JPY", symbol: "XAUUSD" },
+    { id: "hfm-4597", label: "HFM · 4597", currency: "JPY", symbol: "XAUUSDx" },
+];
+function accountStorageKey(id) { return id === DEFAULT_ACCOUNT_ID ? STORAGE_KEY : `${STORAGE_KEY}.account.${id}`; }
+function loadSelectedAccount() {
+    try { const id = window.localStorage.getItem(ACCOUNT_SELECTION_KEY); return DEFAULT_ACCOUNTS.some(a => a.id === id) ? id : DEFAULT_ACCOUNT_ID; }
+    catch (_) { return DEFAULT_ACCOUNT_ID; }
+}
 const THEME_KEY = "gold-profit-note.theme.v1";
 const MAX_ROWS = 20000;
 const MAX_NOTE = 2000;
@@ -769,7 +784,7 @@ function readImport(text) {
     }
     const raw = Array.isArray(parsed) ? parsed : parsed && parsed.records;
     const records = normalizeRecords(raw);
-    return { records, duplicates: raw.length - records.length };
+    return { records, duplicates: raw.length - records.length, accountId: parsed && !Array.isArray(parsed) ? parsed.accountId : undefined };
 }
 function parsePnl(text) {
     const value = text.normalize("NFKC").trim().replace(/−/g, "-").replace(/円$/, "").trim();
@@ -785,15 +800,16 @@ function seedRecords() {
     const updatedAt = nowISO();
     return SEED_VALUES.map(([date, pnl]) => ({ date, pnl, note: "", source: "mt5", updatedAt }));
 }
-function loadInitial() {
+function loadInitial(accountId = DEFAULT_ACCOUNT_ID) {
     const savedAt = nowISO();
+    const initialRecords = () => accountId === DEFAULT_ACCOUNT_ID ? seedRecords() : [];
     let raw = null;
     try {
         if (typeof window === "undefined")
-            return { records: seedRecords(), savedAt, needsSave: false, blocked: false, warning: "", raw: null };
-        raw = window.localStorage.getItem(STORAGE_KEY);
+            return { records: initialRecords(), savedAt, needsSave: false, blocked: false, warning: "", raw: null };
+        raw = window.localStorage.getItem(accountStorageKey(accountId));
         if (raw === null)
-            return { records: seedRecords(), savedAt, needsSave: true, blocked: false, warning: "", raw: null };
+            return { records: initialRecords(), savedAt, needsSave: true, blocked: false, warning: "", raw: null };
         const data = JSON.parse(raw);
         const records = normalizeRecords(Array.isArray(data) ? data : data.records);
         const storedTime = Array.isArray(data) ? undefined : data.savedAt;
@@ -803,7 +819,7 @@ function loadInitial() {
     catch (_) {
         // 読み取れないデータを、初期データで勝手に上書きしません。
         return {
-            records: raw === null ? seedRecords() : [], savedAt, needsSave: false, blocked: true, raw,
+            records: raw === null ? initialRecords() : [], savedAt, needsSave: false, blocked: true, raw,
             warning: raw === null
                 ? "ブラウザの保存領域を使えないため、この画面だけで記録しています。閉じる前に「書き出し」でコピーして保管してください。"
                 : "保存データを読み取れませんでした。元のデータは変更していません。この画面の変更は一時的です。「書き出し」から元データも取り出せます。",
@@ -1276,11 +1292,13 @@ const MT5_SYNC_API = "https://qohtfituiipoglrgbrsl.supabase.co/functions/v1/mt5-
 class GoldProfitNote extends React.Component {
     constructor(props) {
         super(props);
+        this.activeAccountId = loadSelectedAccount();
+        this.syncRequestId = 0;
         this.persist = (records, savedAt) => {
             if (this.storageBlocked)
                 return this.initial.warning || "保存データを安全に読み取れないため、この画面だけで記録しています。「書き出し」でコピーして保管してください。";
             try {
-                window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, savedAt, records }));
+                window.localStorage.setItem(accountStorageKey(this.activeAccountId), JSON.stringify({ version: 1, accountId: this.activeAccountId, savedAt, records }));
                 return "";
             }
             catch (_) {
@@ -1288,7 +1306,7 @@ class GoldProfitNote extends React.Component {
             }
         };
         this.onStorage = event => {
-            if (event.key !== STORAGE_KEY && event.key !== null)
+            if (event.key !== accountStorageKey(this.activeAccountId) && event.key !== null)
                 return;
             if (this.storageBlocked)
                 return;
@@ -1436,7 +1454,7 @@ class GoldProfitNote extends React.Component {
             }
         };
         this.copyExport = async () => {
-            const text = JSON.stringify([...this.state.records].sort((a, b) => a.date.localeCompare(b.date)), null, 2);
+            const text = JSON.stringify({ version: 1, accountId: this.activeAccountId, records: [...this.state.records].sort((a, b) => a.date.localeCompare(b.date)) }, null, 2);
             try {
                 if (typeof navigator === "undefined" || !navigator.clipboard || !navigator.clipboard.writeText)
                     throw new Error("no clipboard");
@@ -1454,7 +1472,9 @@ class GoldProfitNote extends React.Component {
         };
         this.previewImport = () => {
             try {
-                this.setState({ importPreview: readImport(this.state.importText), importError: "" });
+                const preview = readImport(this.state.importText);
+                if (preview.accountId && preview.accountId !== this.activeAccountId) throw new Error("別の口座のデータです。該当する口座に切り替えてから読み込んでください。");
+                this.setState({ importPreview: preview, importError: "" });
             }
             catch (error) {
                 this.setState({ importPreview: null, importError: error.message });
@@ -1474,11 +1494,15 @@ class GoldProfitNote extends React.Component {
             }
         };
         this.syncFromMt5 = async (silent = true) => {
+            const accountId = this.activeAccountId, timeframe = this.state.chartTf || "M15", requestId = ++this.syncRequestId;
+            const isCurrent = () => this.activeAccountId === accountId && this.syncRequestId === requestId && this.state.chartTf === timeframe;
             try {
-                const response = await fetch(MT5_SYNC_API + "?tf=" + encodeURIComponent(this.state.chartTf || "M15"), { cache: "no-store" });
+                const response = await fetch(MT5_SYNC_API + "?tf=" + encodeURIComponent(timeframe) + "&account=" + encodeURIComponent(accountId), { cache: "no-store" });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const payload = await response.json();
+                if (!isCurrent()) return;
                 if (!payload || !payload.ok || !Array.isArray(payload.daily)) throw new Error("invalid response");
+                if (payload.accountId !== accountId && !(accountId === DEFAULT_ACCOUNT_ID && payload.accountId === undefined)) throw new Error("Account mismatch");
                 const current = this.state.records || [];
                 const byDate = new Map(current.map(row => [row.date, row]));
                 payload.daily.forEach(row => {
@@ -1495,14 +1519,28 @@ class GoldProfitNote extends React.Component {
                 const next = Array.from(byDate.values()).sort((a,b)=>a.date.localeCompare(b.date));
                 const savedAt = nowISO();
                 const warning = this.persist(next, savedAt);
-                this.setState({ records: next, savedAt, warning, mt5Metrics: mt5DailyMetrics(payload.daily), mt5Status: payload.status || null, mt5Trades: Array.isArray(payload.trades) ? payload.trades : [], mt5Candles: Array.isArray(payload.candles) ? payload.candles : [], syncState: "ok" });
+                this.setState({ records: next, savedAt, warning, accounts: Array.isArray(payload.accounts) && payload.accounts.length ? payload.accounts : this.state.accounts, mt5Metrics: mt5DailyMetrics(payload.daily), mt5Status: payload.status || null, mt5Trades: Array.isArray(payload.trades) ? payload.trades : [], mt5Candles: Array.isArray(payload.candles) ? payload.candles : [], syncState: "ok" });
                 if (!silent) this.notify("MT5の最新データを反映しました。");
             } catch (_) {
+                if (!isCurrent()) return;
                 this.setState({ syncState: "error" });
                 if (!silent) this.notify("MT5との同期に失敗しました。しばらくしてから再試行します。");
             }
         };
-        const initial = loadInitial();
+        this.switchAccount = accountId => {
+            if (accountId === this.activeAccountId || !this.state.accounts.some(a => a.id === accountId)) return;
+            this.activeAccountId = accountId;
+            ++this.syncRequestId;
+            const initial = loadInitial(accountId);
+            this.initial = initial;
+            this.storageBlocked = initial.blocked;
+            try { window.localStorage.setItem(ACCOUNT_SELECTION_KEY, accountId); } catch (_) {}
+            this.setState({ accountId, records: initial.records, savedAt: initial.savedAt, warning: initial.warning,
+                mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], syncState: "loading",
+                editing: null, date: mt5Today(), pnlInput: "", note: "", formError: "", formErrorField: null,
+                deleteTarget: null, importPreview: null, importText: "", importError: "", notice: "" }, () => this.syncFromMt5(true));
+        };
+        const initial = loadInitial(this.activeAccountId);
         const theme = loadTheme();
         this.initial = initial;
         this.storageBlocked = initial.blocked;
@@ -1514,6 +1552,7 @@ class GoldProfitNote extends React.Component {
         this.exportRef = makeRef();
         this.importRef = makeRef();
         this.state = {
+            accountId: this.activeAccountId, accounts: DEFAULT_ACCOUNTS,
             records: initial.records, savedAt: initial.savedAt, warning: initial.warning,
             theme: theme.theme, tab: "daily", date: mt5Today(), pnlInput: "", note: "",
             editing: null, formError: "", formErrorField: null, deleteTarget: null,
@@ -1544,6 +1583,7 @@ class GoldProfitNote extends React.Component {
     }
     componentWillUnmount() {
         clearTimeout(this.noticeTimer);
+        ++this.syncRequestId;
         if (this.media && this.onThemeChange) {
             if (this.media.removeEventListener)
                 this.media.removeEventListener("change", this.onThemeChange);
@@ -1707,7 +1747,7 @@ class GoldProfitNote extends React.Component {
                 React.createElement("p", { className: "gn-dialog-description", id: "gn-transfer-description" }, isExport ? `全${records.length}日分の記録です。コピーして保管するか、別の端末の「読み込み」に貼り付けてください。` : "「書き出し」でコピーしたJSONを貼り付けてください。取り込む前に件数を確認できます。"),
                 isExport ? React.createElement(Fragment, null,
                     React.createElement("label", { htmlFor: "gn-export-text" }, "\u5168\u8A18\u9332\uFF08JSON\uFF09"),
-                    React.createElement("textarea", { id: "gn-export-text", className: "gn-textarea gn-export-area gn-mono", value: JSON.stringify([...records].sort((a, b) => a.date.localeCompare(b.date)), null, 2), readOnly: true, ref: this.exportRef, spellCheck: false }),
+                    React.createElement("textarea", { id: "gn-export-text", className: "gn-textarea gn-export-area gn-mono", value: JSON.stringify({ version: 1, accountId: this.activeAccountId, records: [...records].sort((a, b) => a.date.localeCompare(b.date)) }, null, 2), readOnly: true, ref: this.exportRef, spellCheck: false }),
                     copyMessage && React.createElement("p", { className: "gn-dialog-message", role: "status" }, copyMessage),
                     this.initial.raw !== null && React.createElement("details", { className: "gn-recovery" },
                         React.createElement("summary", null, "\u8AAD\u307F\u53D6\u308C\u306A\u304B\u3063\u305F\u5143\u30C7\u30FC\u30BF\u3092\u8868\u793A"),
@@ -1828,9 +1868,17 @@ class GoldProfitNote extends React.Component {
             onMonthChange: showMonthControls ? analysisMonth => this.setState({ analysisMonth }) : null,
         });
     }
+    renderAccountSelector(mobile = false) {
+        const id = mobile ? "kgf-account-choice" : "gn-account-choice";
+        return React.createElement("div", { className: mobile ? "kgf-account-picker" : "gn-account-picker" },
+            React.createElement("label", { htmlFor: id }, "表示する口座"),
+            React.createElement("select", { id, value: this.state.accountId, onChange: event => this.switchAccount(event.target.value) },
+                this.state.accounts.map(account => React.createElement("option", { key: account.id, value: account.id }, account.label))));
+    }
     renderKomaDashboard(data, period) {
         const s=this.state.mt5Status, tr=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
         const syncHealth=mt5SyncHealth(s,this.state.syncState);
+        const selectedAccount=this.state.accounts.find(a=>a.id===this.state.accountId)||DEFAULT_ACCOUNTS[0];
         const total=Number(data.total)||0, wins=Number(data.wins)||0, losses=Number(data.losses)||0;
         const rate=(wins+losses)?wins/(wins+losses)*100:0;
         const allTrades=Array.isArray(this.state.mt5Trades)?this.state.mt5Trades:[];
@@ -1857,7 +1905,8 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div",{className:"kgf-logo"},"K"),
                 React.createElement("div",{className:"kgf-brand"},React.createElement("h1",null,"KOMA GOLD 日記"),React.createElement("p",null,"TRADE · LOG · ANALYZE · IMPROVE")),
                 React.createElement("em",null,"継続は、最強の武器。")),
-            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,"HFM · XAUUSD")),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
+            this.renderAccountSelector(true),
+            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,"HFM · "+selectedAccount.symbol)),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
             syncHealth.message && React.createElement("p",{className:"kgf-sync-warning",role:"status"},syncHealth.message),
             React.createElement("section",{className:"kgf-account"},
                 metric("口座残高",s?Math.round(Number(s.balance)||0).toLocaleString("ja-JP")+"円":"—",""),
@@ -1928,6 +1977,7 @@ class GoldProfitNote extends React.Component {
         return React.createElement("div", { className: "gn-app", "data-theme": theme },
             React.createElement("style", null, CSS),
             React.createElement("main", { className: "gn-shell" },
+                this.renderAccountSelector(false),
                 this.renderKomaDashboard(data, period),
                 React.createElement("header", { className: "gn-header" },
                     React.createElement("div", { className: "gn-brand" },
