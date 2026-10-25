@@ -1,13 +1,15 @@
 """Read-only market and journal snapshot for the TradingAgents team. No order APIs."""
 import argparse
+import calendar
 import json
 import math
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 API = 'https://qohtfituiipoglrgbrsl.supabase.co/functions/v1/mt5-sync'
 JST = timezone(timedelta(hours=9))
+TIMEFRAMES = ('M1', 'M5', 'M15', 'H1')
 
 
 def fetch(account, tf):
@@ -47,9 +49,37 @@ def atr(candles, n=14):
     return a
 
 
+def server_offset(moment):
+    # Same HFM DST rule as sync/gold_sync.py: GMT+3 from the last Sunday in March to the last in October.
+    def last_sunday(month):
+        d = date(moment.year, month, calendar.monthrange(moment.year, month)[1])
+        return d - timedelta(days=(d.weekday() + 1) % 7)
+    return 3 if last_sunday(3) <= moment.date() < last_sunday(10) else 2
+
+
+def resample(candles, hours):
+    """Build H4/D1 bars from H1 in HFM server time, matching the MT5 chart."""
+    buckets = {}
+    for c in candles:
+        t = datetime.fromisoformat(c['candle_time'])
+        wall = t + timedelta(hours=server_offset(t))
+        key = wall.replace(hour=wall.hour - wall.hour % hours, minute=0, second=0, microsecond=0)
+        b = buckets.get(key)
+        if b is None:
+            buckets[key] = b = dict(c, candle_time=key.strftime('%Y-%m-%dT%H:%M (server)'), hours=0)
+        else:
+            b.update(high=max(b['high'], c['high']), low=min(b['low'], c['low']), close=c['close'],
+                     tick_volume=b['tick_volume'] + c['tick_volume'])
+        b['hours'] += 1
+    # The first bucket usually starts mid-bar, so it would misstate that bar's open, high and low.
+    return list(buckets.values())[1:]
+
+
 def technicals(candles):
     if len(candles) < 30:
-        return {'candles': len(candles), 'note': 'not enough candles'}
+        # Too few bars for the indicators; the recent bars still show levels such as the previous day's range.
+        return {'candles': len(candles), 'note': 'too few bars for indicators',
+                'bars': [{k: c[k] for k in ('candle_time', 'open', 'high', 'low', 'close')} for c in candles]}
     closes = [c['close'] for c in candles]
     macd = [a - b for a, b in zip(ema(closes, 12), ema(closes, 26))]
     signal = ema(macd, 9)
@@ -107,15 +137,23 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--account', default='all')
     p.add_argument('--days', type=int, default=30)
+    p.add_argument('--balance', type=float, help='HFM KATANA balance in JPY, given by the user')
     args = p.parse_args()
-    h1, m15 = fetch(args.account, 'H1'), fetch(args.account, 'M15')
+    data = {tf: fetch(args.account, tf) for tf in TIMEFRAMES}
+    h1 = data['H1']
     s = h1['status']
+    bars = {tf: data[tf]['candles'] for tf in TIMEFRAMES}
+    bars['H4'], bars['D1'] = resample(h1['candles'], 4), resample(h1['candles'], 24)
     print(json.dumps({
         'generated_at_jst': datetime.now(JST).isoformat(timespec='minutes'),
-        'symbol': h1['account']['symbol'], 'account': h1['account']['label'],
-        'account_status': {k: s.get(k) for k in ('balance', 'equity', 'floating_pnl', 'open_positions', 'updated_at')},
-        'currency': h1['account'].get('currency'),
-        'technicals': {'H1': technicals(h1['candles']), 'M15': technicals(m15['candles'])},
+        'symbol': h1['account']['symbol'],
+        # Orders are planned for the KATANA account, which the dashboard does not sync.
+        'trading_account': {'name': 'HFM KATANA', 'currency': 'JPY', 'balance': args.balance,
+                            'note': None if args.balance else 'balance not given; ask the user'},
+        'reference_account': h1['account']['label'],
+        'reference_status': {k: s.get(k) for k in ('balance', 'equity', 'floating_pnl', 'open_positions', 'updated_at')},
+        'technicals': {tf: technicals(bars[tf]) for tf in ('D1', 'H4', 'H1', 'M15', 'M5', 'M1')},
+        'technicals_note': 'H4 and D1 are built from the last 120 H1 bars in server time; the last bar may still be open. W1 is not available.',
         'journal': journal(h1, args.days),
     }, ensure_ascii=False, indent=1, default=str))
 
