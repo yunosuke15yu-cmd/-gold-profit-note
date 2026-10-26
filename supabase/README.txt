@@ -23,6 +23,11 @@ for each account. Each scheduled worker must attach to its designated running
 terminal; it must not switch terminal logins. The default profile remains
 compatible with the original account.
 
+Registered HFM suffixes: 5620, 4597, 4701. Combined views discover accounts
+from mt5_accounts; adding an account does not require a function redeployment.
+Use a separate terminal and worker profile per account to keep all three
+connected at the same time. Desktop and mobile labels use the account count.
+
 Checks (Node 18+ / Python 3.12):
   node tests/multi-account.cjs
   python tests/test_sync.py

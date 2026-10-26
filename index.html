@@ -625,6 +625,7 @@ const DEFAULT_ACCOUNT_ID = "hfm-5620";
 const DEFAULT_ACCOUNTS = [
     { id: "hfm-5620", label: "HFM · 5620", currency: "JPY", symbol: "XAUUSD" },
     { id: "hfm-4597", label: "HFM · 4597", currency: "JPY", symbol: "XAUUSDx" },
+    { id: "hfm-4701", label: "HFM · 4701", currency: "JPY", symbol: "XAUUSDx" },
 ];
 function accountStorageKey(id) { return id === DEFAULT_ACCOUNT_ID ? STORAGE_KEY : `${STORAGE_KEY}.account.${id}`; }
 function loadSelectedAccount() {
@@ -1976,7 +1977,7 @@ class GoldProfitNote extends React.Component {
                         React.createElement("div", { className: "gn-brand-icon" },
                             React.createElement(Icon, { name: "book", size: 24 })),
                         React.createElement("div", null,
-                            React.createElement("p", { className: "gn-eyebrow" }, "HFM MT5 · 2口座合算"),
+                            React.createElement("p", { className: "gn-eyebrow" }, `HFM MT5 · ${this.state.accounts.length}口座合算`),
                             React.createElement("h1", null, "\u30B4\u30FC\u30EB\u30C9\u53CE\u652F\u30CE\u30FC\u30C8"))),
                     React.createElement("div", { className: "gn-header-right" },
                         React.createElement("p", { className: "gn-updated" },
