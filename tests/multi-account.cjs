@@ -13,7 +13,7 @@ const oldRecords=[{date:'2026-10-01',pnl:111,note:'old account note',source:'man
 store.set(oldKey,JSON.stringify({savedAt:'2026-10-01T00:00:00Z',records:oldRecords}));
 store.set(oldKey+'.account.hfm-4597',JSON.stringify({records:[{...oldRecords[0],pnl:222,note:'second account note'}]}));
 const app=new App({});
-assert.equal(app.state.accounts.length,3);assert.equal(app.activeAccountId,'all');assert.equal(app.state.records[0].pnl,333);
+assert.equal(app.state.accounts.length,2);assert.equal(app.activeAccountId,'all');assert.equal(app.state.records[0].pnl,333);
 assert.match(app.state.records[0].note,/old account note/);assert.match(app.state.records[0].note,/second account note/);
 assert.notEqual(vm.runInContext("accountStorageKey('hfm-4597')",appCtx),oldKey);
 assert.equal(vm.runInContext("tradeKey({account_id:'a',deal_ticket:7})!==tradeKey({account_id:'b',deal_ticket:7})",appCtx),true);
@@ -62,5 +62,14 @@ const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data})
  assert.equal((await post('key2',{...valid,accountId:'hfm-4701',sourceAccount:{login:3,server:'HFM2',currency:'JPY'}})).status,200);assert.equal(writes[2].rows[0].account_id,'hfm-4701');
  assert.equal((await post('key0',{daily:[{date:'2026-10-23',pnl:1,trades:1,wins:1,losses:0}]})).status,200);
  assert.throws(()=>prepare({...valid,daily:[{date:'2026-02-30',pnl:1,trades:1,wins:1,losses:0}]},accounts[1],auths[1]));
+ accounts[1].is_active=false;
+ const archivedResponse=await handle(new Request('https://example.test/?account=all'),sb);const archived=await archivedResponse.json();
+ assert.equal(archived.accounts.length,2);assert.equal(archived.archivedAccounts[0].id,'hfm-4597');
+ assert.equal(archived.daily[0].pnl,6);assert.equal(archived.trades.length,3);assert.equal(archived.status.balance,400);assert.equal(archived.status.account_statuses.length,2);
+ assert(!archived.status.account_statuses.some(s=>s.id==='hfm-4597'));
+ const writeCount=writes.length;assert.equal((await post('key1',valid)).status,403);assert.equal(writes.length,writeCount);
+ assert.equal((await handle(new Request('https://example.test/?account=hfm-4597'),sb)).status,200);
+ const archivedMissing=combine(accounts,[r[0],{...r[1],status:null},{...r[0],candles:[{close:99}]}],'M15');
+ assert.equal(archivedMissing.status.updated_at,'2026-10-24T02:59:00Z');assert.equal(archivedMissing.chartAccountId,'hfm-4701');
  console.log('PASS API: combined daily/status/trades, oldest sync time, missing account, one representative price chart, scoped uploads remain isolated, private auth hidden, malformed uploads rejected, legacy compatibility');
 })().catch(e=>{console.error(e);process.exitCode=1;});

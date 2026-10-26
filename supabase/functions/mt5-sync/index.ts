@@ -45,15 +45,17 @@ function combineAccounts(accounts,results,tf) {
   if(Date.parse(row.updated_at)>Date.parse(day.updated_at))day.updated_at=row.updated_at;
   days.set(row.trade_date,day);
  }
- const statuses=results.map(r=>r.status),timestamps=statuses.map(s=>s&&s.updated_at);
- const complete=timestamps.every(t=>t&&Number.isFinite(Date.parse(t)));
+ const activeIndexes=accounts.flatMap((a,i)=>a.is_active===false?[]:[i]);
+ const activeAccounts=activeIndexes.map(i=>accounts[i]);
+ const statuses=activeIndexes.map(i=>results[i].status),timestamps=statuses.map(s=>s&&s.updated_at);
+ const complete=timestamps.length>0&&timestamps.every(t=>t&&Number.isFinite(Date.parse(t)));
  const oldest=complete?timestamps.reduce((a,b)=>Date.parse(a)<Date.parse(b)?a:b):null;
  const status={id:1,account_id:"all",balance:sum(statuses,"balance"),equity:sum(statuses,"equity"),floating_pnl:sum(statuses,"floating_pnl"),open_positions:sum(statuses,"open_positions"),updated_at:oldest,
-  account_statuses:accounts.map((a,i)=>({id:a.id,label:a.label,updated_at:timestamps[i]||null}))};
+  account_statuses:activeAccounts.map((a,i)=>({id:a.id,label:a.label,updated_at:timestamps[i]||null}))};
  const trades=results.flatMap(r=>r.trades).sort((a,b)=>Date.parse(b.trade_time)-Date.parse(a.trade_time)||Number(b.deal_ticket)-Number(a.deal_ticket)||String(a.account_id).localeCompare(String(b.account_id))).slice(0,500);
  // Price candles represent one gold market; prices are never added together.
- const chartIndex=results.findIndex(r=>r.candles.length>0),chart=chartIndex<0?null:results[chartIndex];
- return {ok:true,accountId:"all",account:{id:"all",label:`HFM ${accounts.length}口座合算`,currency:"JPY",symbol:chartIndex<0?"XAUUSD":accounts[chartIndex].symbol},accounts,
+ const chartIndex=results.findIndex((r,i)=>accounts[i].is_active!==false&&r.candles.length>0),chart=chartIndex<0?null:results[chartIndex];
+ return {ok:true,accountId:"all",account:{id:"all",label:`HFM ${activeAccounts.length}口座合算`,currency:"JPY",symbol:chartIndex<0?"XAUUSD":accounts[chartIndex].symbol},accounts:activeAccounts,archivedAccounts:accounts.filter(a=>a.is_active===false),
   daily:[...days.values()].sort((a,b)=>a.trade_date.localeCompare(b.trade_date)),status,trades,candles:chart?chart.candles:[],chartAccountId:chartIndex<0?null:accounts[chartIndex].id,timeframe:tf};
 }
 async function handleRequest(req,sb) {
@@ -62,7 +64,7 @@ async function handleRequest(req,sb) {
   if(req.method==="GET"){
    const url=new URL(req.url),accountId=url.searchParams.get("account")||DEFAULT_ACCOUNT,tf=url.searchParams.get("tf")||"M15";
    if(!["M1","M5","M15","H1"].includes(tf))return reply({ok:false,error:"Invalid timeframe"},400);
-   const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order").order("sort_order");
+   const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order,is_active").order("sort_order");
    if(error)throw error;
    if(accountId==="all"){
     const results=await Promise.all(accounts.map(a=>readAccount(sb,a,tf)));
@@ -70,7 +72,7 @@ async function handleRequest(req,sb) {
    }
    const account=accounts.find(a=>a.id===accountId);
    if(!account)return reply({ok:false,error:"Unknown account"},404);
-   return reply({ok:true,accounts,accountId,account,...await readAccount(sb,account,tf),timeframe:tf});
+   return reply({ok:true,accounts:accounts.filter(a=>a.is_active!==false),archivedAccounts:accounts.filter(a=>a.is_active===false),accountId,account,...await readAccount(sb,account,tf),timeframe:tf});
   }
   if(req.method==="POST"){
    const key=req.headers.get("x-sync-key")||"";
@@ -80,8 +82,9 @@ async function handleRequest(req,sb) {
    const {data:auth,error:authError}=await sb.from("mt5_account_auth").select("account_id,account_login,server").eq("key_hash",hash).maybeSingle();
    if(authError)throw authError;
    if(!auth)return reply({ok:false,error:"Unauthorized"},401);
-   const {data:account,error:accountError}=await sb.from("mt5_accounts").select("id,currency,symbol").eq("id",auth.account_id).single();
+   const {data:account,error:accountError}=await sb.from("mt5_accounts").select("id,currency,symbol,is_active").eq("id",auth.account_id).single();
    if(accountError)throw accountError;
+   if(account.is_active===false)return reply({ok:false,error:"Account is archived"},403);
    let upload;
    try {upload=prepareUpload(await req.json(),account,auth);}catch(_){return reply({ok:false,error:"Invalid payload or account identity"},400);}
    // Validate every section first. Write status last so failed uploads do not appear fresh.

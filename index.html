@@ -624,8 +624,10 @@ const STORAGE_KEY = "gold-profit-note.records.v1";
 const DEFAULT_ACCOUNT_ID = "hfm-5620";
 const DEFAULT_ACCOUNTS = [
     { id: "hfm-5620", label: "HFM · 5620", currency: "JPY", symbol: "XAUUSD" },
-    { id: "hfm-4597", label: "HFM · 4597", currency: "JPY", symbol: "XAUUSDx" },
     { id: "hfm-4701", label: "HFM · 4701", currency: "JPY", symbol: "XAUUSDx" },
+];
+const ARCHIVED_ACCOUNTS = [
+    { id: "hfm-4597", label: "HFM · 4597", currency: "JPY", symbol: "XAUUSDx" },
 ];
 function accountStorageKey(id) { return id === DEFAULT_ACCOUNT_ID ? STORAGE_KEY : `${STORAGE_KEY}.account.${id}`; }
 function loadSelectedAccount() {
@@ -812,7 +814,7 @@ function loadInitial(accountId = DEFAULT_ACCOUNT_ID) {
             return { records: initialRecords(), savedAt, needsSave: false, blocked: false, warning: "", raw: null };
         raw = window.localStorage.getItem(accountStorageKey(accountId));
         if (raw === null && accountId === "all") {
-            const profiles = DEFAULT_ACCOUNTS.map(account => ({ account, initial: loadInitial(account.id) }));
+            const profiles = [...DEFAULT_ACCOUNTS, ...ARCHIVED_ACCOUNTS].map(account => ({ account, initial: loadInitial(account.id) }));
             const byDate = new Map();
             profiles.forEach(({ account, initial }) => initial.records.forEach(row => {
                 const old = byDate.get(row.date) || { ...row, pnl: 0, note: "" };

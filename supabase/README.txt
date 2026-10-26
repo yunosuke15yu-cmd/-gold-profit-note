@@ -23,10 +23,14 @@ for each account. Each scheduled worker must attach to its designated running
 terminal; it must not switch terminal logins. The default profile remains
 compatible with the original account.
 
-Registered HFM suffixes: 5620, 4597, 4701. Combined views discover accounts
-from mt5_accounts; adding an account does not require a function redeployment.
-Use a separate terminal and worker profile per account to keep all three
-connected at the same time. Desktop and mobile labels use the account count.
+Active HFM suffixes: 5620, 4701. The closed 4597 account has is_active=false.
+All historical P/L and trades, including 4597, remain in the combined diary.
+Only active accounts contribute live balances, equity, positions, freshness,
+chart source and the account count. Archived accounts reject new uploads.
+The is_active column defaults true and retains the existing RLS protections.
+Combined views discover metadata from mt5_accounts. Use one running terminal
+and worker profile per active account. A reused terminal directory may keep
+its old name; source login/server/currency checks still bind it to its account.
 
 Checks (Node 18+ / Python 3.12):
   node tests/multi-account.cjs
