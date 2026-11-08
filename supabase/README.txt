@@ -23,8 +23,10 @@ for each account. Each scheduled worker must attach to its designated running
 terminal; it must not switch terminal logins. The default profile remains
 compatible with the original account.
 
-Active HFM suffixes: 5620, 4701. The closed 4597 account has is_active=false.
-All historical P/L and trades, including 4597, remain in the combined diary.
+Active HFM suffix: 4701. The closed 5620 and 4597 accounts have is_active=false.
+All historical P/L and trades, including 5620 and 4597, remain in the combined diary.
+(hfm-5620 stays the legacy default id for the original localStorage key and
+the API default; that does not make it active.)
 Only active accounts contribute live balances, equity, positions, freshness,
 chart source and the account count. Archived accounts reject new uploads.
 The is_active column defaults true and retains the existing RLS protections.
