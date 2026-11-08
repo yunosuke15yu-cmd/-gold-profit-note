@@ -99,5 +99,17 @@ const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data})
  assert.equal(only.daily[0].pnl,6);assert.equal(only.trades.length,3);assert.equal(only.status.balance,300);assert.equal(only.status.account_statuses.length,1);assert.equal(only.chartAccountId,'hfm-4701');
  const writeCount5620=writes.length;assert.equal((await post('key0',{daily:[{date:'2026-10-23',pnl:1,trades:1,wins:1,losses:0}]})).status,403);assert.equal(writes.length,writeCount5620);
  assert.equal((await post('key2',{...valid,accountId:'hfm-4701',sourceAccount:{login:3,server:'HFM2',currency:'JPY'}})).status,200);
+ // counted_until: a closed account stops adding to the combined diary after that server day
+ const cut=[{id:'hfm-5620',is_active:false,counted_until:'2026-10-31'},{id:'hfm-4701'}];
+ const cutRes=[{daily:[{trade_date:'2026-10-31',pnl:-10,trades:1,wins:0,losses:1,updated_at:'2026-11-05T00:00:00Z'},{trade_date:'2026-11-05',pnl:-85064,trades:3,wins:0,losses:3,updated_at:'2026-11-05T00:00:00Z'}],status:null,trades:[{trade_date:'2026-10-31',trade_time:'2026-10-31T10:00:00Z',deal_ticket:1,account_id:'hfm-5620',net_pnl:-10},{trade_date:'2026-11-05',trade_time:'2026-11-05T10:00:00Z',deal_ticket:2,account_id:'hfm-5620',net_pnl:-85064}],candles:[]},
+  {daily:[{trade_date:'2026-11-05',pnl:26101,trades:146,wins:108,losses:34,updated_at:'2026-11-08T00:00:00Z'}],status:{balance:0,updated_at:'2026-11-08T00:00:00Z'},trades:[{trade_date:'2026-11-05',trade_time:'2026-11-05T11:00:00Z',deal_ticket:3,account_id:'hfm-4701',net_pnl:26101}],candles:[]}];
+ const cutAll=combine(cut,cutRes,'M15');
+ assert.equal(JSON.stringify(cutAll.daily.map(d=>[d.trade_date,d.pnl,d.trades])),JSON.stringify([['2026-10-31',-10,1],['2026-11-05',26101,146]]));
+ assert.equal(cutAll.trades.map(t=>t.deal_ticket).join(),'3,1');
+ assert.equal(cutRes[0].daily.length,2);// source rows are not mutated
+ accounts[0].counted_until='2026-10-22';
+ const cutLive=await (await handle(new Request('https://example.test/?account=all'),sb)).json();
+ assert.equal(cutLive.daily[0].pnl,5);assert(!cutLive.trades.some(t=>t.account_id==='hfm-5620'));
+ const scoped5620=await (await handle(new Request('https://example.test/?account=hfm-5620'),sb)).json();assert.equal(scoped5620.daily.length,1);
  console.log('PASS API: combined daily/status/trades, oldest sync time, missing account, one representative price chart, scoped uploads remain isolated, private auth hidden, malformed uploads rejected, legacy compatibility');
 })().catch(e=>{console.error(e);process.exitCode=1;});

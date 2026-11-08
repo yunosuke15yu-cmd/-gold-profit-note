@@ -25,6 +25,9 @@ compatible with the original account.
 
 Active HFM suffix: 4701. The closed 5620 and 4597 accounts have is_active=false.
 All historical P/L and trades, including 5620 and 4597, remain in the combined diary.
+mt5_accounts.counted_until (date, nullable) is the last HFM server day an
+account adds to the combined diary. hfm-5620 is counted through 2026-10-31;
+its later rows stay in the database and in the scoped ?account=hfm-5620 view.
 (hfm-5620 stays the legacy default id for the original localStorage key and
 the API default; that does not make it active.)
 Only active accounts contribute live balances, equity, positions, freshness,

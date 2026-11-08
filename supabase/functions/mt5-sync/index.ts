@@ -37,8 +37,12 @@ async function readAccount(sb,account,tf) {
  if(d.error||s.error||t.error||c.error)throw new Error("Data read failed");
  return {daily:d.data||[],status:s.data,trades:t.data||[],candles:[...(c.data||[])].reverse()};
 }
-function combineAccounts(accounts,results,tf) {
+// counted_until (date, optional): last HFM server day this account adds to the combined diary.
+// Later rows stay in the database and in the scoped ?account=<id> view.
+const counted = (account,row) => !account.counted_until||String(row.trade_date)<=account.counted_until;
+function combineAccounts(accounts,allResults,tf) {
  const days=new Map(),sum=(xs,key)=>xs.reduce((total,row)=>total+(Number(row&&row[key])||0),0);
+ const results=allResults.map((r,i)=>({...r,daily:r.daily.filter(row=>counted(accounts[i],row)),trades:r.trades.filter(row=>counted(accounts[i],row))}));
  for(const result of results)for(const row of result.daily){
   const day=days.get(row.trade_date)||{account_id:"all",trade_date:row.trade_date,pnl:0,trades:0,wins:0,losses:0,source:"mt5",updated_at:row.updated_at};
   for(const key of ["pnl","trades","wins","losses"])day[key]+=Number(row[key])||0;
@@ -64,7 +68,7 @@ async function handleRequest(req,sb) {
   if(req.method==="GET"){
    const url=new URL(req.url),accountId=url.searchParams.get("account")||DEFAULT_ACCOUNT,tf=url.searchParams.get("tf")||"M15";
    if(!["M1","M5","M15","H1"].includes(tf))return reply({ok:false,error:"Invalid timeframe"},400);
-   const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order,is_active").order("sort_order");
+   const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order,is_active,counted_until").order("sort_order");
    if(error)throw error;
    if(accountId==="all"){
     const results=await Promise.all(accounts.map(a=>readAccount(sb,a,tf)));
