@@ -342,6 +342,19 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
  .kgf-analysis-detail{margin:16px 0 5px;color:#edc76a;font-size:13px}
 }
 /* Timing analysis shares one component between desktop and mobile. */
+.kgf-sync-closed .kgf-live i{background:#7d8b98!important;box-shadow:none!important}.kgf-sync-closed .kgf-live b{color:#b9c4ce}
+.kgf-goal-pace span{display:block}
+.kgf-goal-pace{display:block;margin-top:5px;color:#9fb0bf;font-size:9.5px;line-height:1.5;text-align:center;overflow-wrap:anywhere}
+.gn-goal-sub{margin-top:9px;font-size:11px;flex-wrap:wrap}
+.kgf-goal-edit{display:block;margin:8px auto 0;padding:4px 10px;border:1px solid rgba(217,183,95,.3);border-radius:999px;background:transparent;color:#d7b76e;font-size:10px;cursor:pointer}
+.kgf-goal-edit.kgf-goal-pc{margin:10px 0 0}
+.kgf-goal-form{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:9px}
+.kgf-goal-form label{display:flex;align-items:center;gap:4px;flex:1 1 110px;min-width:0;color:#9fb0bf;font-size:11px}
+.kgf-goal-form input{width:100%;min-width:0;padding:6px 8px;border:1px solid rgba(217,183,95,.35);border-radius:8px;background:rgba(0,0,0,.25);color:#edf3f8;font-size:16px;font-variant-numeric:tabular-nums}
+.kgf-goal-form input[aria-invalid="true"]{border-color:#ff7d95}
+.kgf-goal-form button{padding:6px 10px;border:1px solid rgba(217,183,95,.35);border-radius:8px;background:rgba(217,183,95,.12);color:#f2d58c;font-size:11px;cursor:pointer}
+.kgf-goal-form button[type=button]{background:transparent;color:#9fb0bf;border-color:rgba(148,174,205,.25)}
+.kgf-goal-form small{flex-basis:100%;color:#ff9aac;font-size:10px}
 .kgf-sync-off{border-color:#9a7134!important}.kgf-sync-off .kgf-live i{background:#e8ae52!important;box-shadow:none!important}.kgf-sync-off .kgf-live b{color:#f2c46e}
 .kgf-sync-warning{margin:8px 0;padding:11px 12px;border:1px solid #9a7134;border-radius:9px;background:#302514;color:#f5d89f;font-size:12px;line-height:1.7}
 .kgf-timing{margin:16px 0;padding:16px;border:1px solid rgba(217,183,95,.35);border-radius:14px;background:#07131c;color:#e5edf3;min-width:0}
@@ -705,9 +718,23 @@ function japanTime(value) {
     const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
     return `${p.month}/${p.day} ${p.hour}:${p.minute}`;
 }
+function goldMarketClosed(now = Date.now()) {
+    // 金の週末休場：ニューヨーク時間の金曜17:00〜日曜18:00（夏時間は Intl が処理）。祝日の休場は判定しない。
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York", weekday: "short", hour: "2-digit", hourCycle: "h23",
+    }).formatToParts(new Date(now)).map(p => [p.type, p.value]));
+    const hour = Number(parts.hour);
+    return (parts.weekday === "Fri" && hour >= 17) || parts.weekday === "Sat" || (parts.weekday === "Sun" && hour < 18);
+}
 function mt5SyncHealth(status, syncState, now = Date.now()) {
     if (syncState === "error") return { fresh: false, label: "MT5 通信エラー", message: "データを取得できません。ネット接続を確認してください。表示中の数値は前回の取得値です。" };
     if (!status) return { fresh: false, label: "MT5 確認中", message: "" };
+    const health = mt5SyncHealthOpen(status, now);
+    // 休場中は MT5 を閉じていても正常。止まっている警告は出さない。
+    if (!health.fresh && goldMarketClosed(now)) return { fresh: false, closed: true, label: "MT5 休場中", message: "" };
+    return health;
+}
+function mt5SyncHealthOpen(status, now) {
     if (Array.isArray(status.account_statuses)) {
         const stale = status.account_statuses.filter(account => {
             const at = Date.parse(account.updated_at || "");
@@ -909,15 +936,51 @@ function mt5DailyMetrics(rows) {
         trades: Math.max(0, Math.floor(finiteAmount(row.trades))),
     })));
 }
-function homeSummary(metrics, today = mt5Today()) {
+const GOAL_KEY = "gold-profit-note.goal.v1";
+const DEFAULT_GOAL = 100000;
+const MAX_GOAL = 1000000000;
+function parseGoal(value) {
+    const text = String(value == null ? "" : value)
+        .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+        .replace(/[,，\s円+＋]/g, "");
+    if (!/^\d+$/.test(text)) return null;
+    const goal = Number(text);
+    return Number.isSafeInteger(goal) && goal > 0 && goal <= MAX_GOAL ? goal : null;
+}
+function loadGoal() {
+    try {
+        if (typeof window === "undefined") return DEFAULT_GOAL;
+        return parseGoal(window.localStorage.getItem(GOAL_KEY)) || DEFAULT_GOAL;
+    } catch (_) { return DEFAULT_GOAL; }
+}
+function tradingDaysLeft(today) {
+    // HFM サーバー日で今日から月末までの平日数（今日が平日なら含む）。
+    if (!validDate(today)) return 0;
+    let count = 0;
+    for (let d = today; d.slice(0, 7) === today.slice(0, 7); d = shiftDate(d, 1)) {
+        const w = utcDate(d).getUTCDay();
+        if (w !== 0 && w !== 6) count++;
+    }
+    return count;
+}
+function homeSummary(metrics, today = mt5Today(), goal = DEFAULT_GOAL) {
     const day = metrics && metrics.daily.find(row => row.date === today);
     const month = metrics && metrics.monthly.find(row => row.key === today.slice(0, 7));
     const monthPnl = finiteAmount(month && month.pnl);
-    const goal = 100000;
     const progress = monthPnl / goal * 100;
+    const remaining = Math.max(0, Math.ceil(goal - monthPnl));
+    const daysLeft = tradingDaysLeft(today);
     return { ready: !!metrics, todayPnl: finiteAmount(day && day.pnl),
         todayCount: day ? day.trades : 0, monthPnl, goal, progress,
-        ring: Math.max(0, Math.min(100, progress)) };
+        ring: Math.max(0, Math.min(100, progress)),
+        achieved: monthPnl >= goal, remaining, daysLeft,
+        perDay: daysLeft ? Math.ceil(remaining / daysLeft) : remaining };
+}
+function goalPaceText(summary) {
+    if (!summary.ready) return "";
+    if (summary.achieved) return "今月の目標を達成しました";
+    if (!summary.daysLeft) return `残り ${signed(summary.remaining)}円`;
+    return `残り ${signed(summary.remaining)}円 · 1日 ${signed(summary.perDay)}円（あと${summary.daysLeft}営業日）`;
 }
 function jstDate(value) {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -1113,7 +1176,7 @@ function RecordsCard({ summary }) {
         ready && !detailComplete && React.createElement("p", { className: "kgf-records-note" },
             "連勝・月間記録などは全取引の明細を確認できないため表示していません。"));
 }
-function HomeSummaryCards({ summary }) {
+function HomeSummaryCards({ summary, editor }) {
     const { ready, todayPnl, todayCount, monthPnl, goal, progress, ring } = summary;
     return React.createElement("section", { className: "kgf-home-cards", "aria-label": "本日と月間の確定損益" },
         React.createElement("article", { className: "kgf-home-card" },
@@ -1127,7 +1190,9 @@ function HomeSummaryCards({ summary }) {
                     React.createElement("circle", { cx: 40, cy: 40, r: 35, fill: "none", stroke: "#24313c", strokeWidth: 4 }),
                     React.createElement("circle", { cx: 40, cy: 40, r: 35, fill: "none", stroke: "#dfb85e", strokeWidth: 4, pathLength: 100, strokeDasharray: "100 100", strokeDashoffset: 100 - ring })),
                 React.createElement("span", { className: "kgf-goal-percent" }, ready ? progress.toFixed(1) + "%" : "—")),
-            React.createElement("small", { className: "kgf-goal-amount" }, ready ? signed(Math.round(monthPnl)) + " / " + signed(goal) + "円" : "実データを同期中")));
+            React.createElement("small", { className: "kgf-goal-amount" }, ready ? signed(Math.round(monthPnl)) + " / " + signed(goal) + "円" : "実データを同期中"),
+            ready && React.createElement("small", { className: "kgf-goal-pace" + (summary.achieved ? " gn-positive" : "") }, goalPaceText(summary).split(" · ").map((part, i) => React.createElement("span", { key: i }, part))),
+            editor));
 }
 function Icon({ name, size = 18, ...props }) {
     const paths = {
@@ -1569,8 +1634,32 @@ class GoldProfitNote extends React.Component {
             theme: theme.theme, tab: "daily", date: mt5Today(), pnlInput: "", note: "",
             editing: null, formError: "", formErrorField: null, deleteTarget: null,
             notice: "", transfer: null, importText: "", importMode: "merge", importPreview: null,
-            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), timingMode: "hour", timingHours: 3, syncState: "loading",
+            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), timingMode: "hour", timingHours: 3, syncState: "loading", goal: loadGoal(), goalEditing: false, goalInput: "", goalError: "",
         };
+    }
+    startGoalEdit() { this.setState({ goalEditing: true, goalInput: String(this.state.goal), goalError: "" }); }
+    cancelGoalEdit() { this.setState({ goalEditing: false, goalError: "" }); }
+    saveGoal(event) {
+        if (event && event.preventDefault) event.preventDefault();
+        const goal = parseGoal(this.state.goalInput);
+        if (!goal) { this.setState({ goalError: "1円〜10億円の整数で入力してください。" }); return; }
+        let goalError = "";
+        try { window.localStorage.setItem(GOAL_KEY, String(goal)); }
+        catch (_) { goalError = "この端末に保存できないため、再読み込みすると元に戻ります。"; }
+        this.setState({ goal, goalEditing: false, goalError: "", notice: goalError || "月間目標を保存しました。" });
+    }
+    renderGoalEditor(variant) {
+        if (!this.state.goalEditing)
+            return React.createElement("button", { type: "button", className: "kgf-goal-edit " + variant, onClick: () => this.startGoalEdit(), "aria-label": "月間目標を変更" }, "目標を変更");
+        return React.createElement("form", { className: "kgf-goal-form " + variant, onSubmit: e => this.saveGoal(e) },
+            React.createElement("label", null,
+                React.createElement("span", { className: "gn-sr-only" }, "月間目標（円）"),
+                React.createElement("input", { type: "text", inputMode: "numeric", autoFocus: true, value: this.state.goalInput, "aria-invalid": this.state.goalError ? "true" : "false",
+                    onChange: e => this.setState({ goalInput: e.target.value, goalError: "" }) }),
+                React.createElement("span", { "aria-hidden": "true" }, "円")),
+            React.createElement("button", { type: "submit" }, "保存"),
+            React.createElement("button", { type: "button", onClick: () => this.cancelGoalEdit() }, "取消"),
+            this.state.goalError && React.createElement("small", { role: "alert" }, this.state.goalError));
     }
     componentDidMount() {
         if (this.initial.needsSave) {
@@ -1894,7 +1983,7 @@ class GoldProfitNote extends React.Component {
         const maxWin=profits.length?Math.max(...profits):0, maxLoss=lossesNet.length?Math.abs(Math.min(...lossesNet)):0;
         let eq=0,peak=0,maxDD=0; [...allTrades].reverse().forEach(x=>{eq+=Number(x.net_pnl)||0;peak=Math.max(peak,eq);maxDD=Math.max(maxDD,peak-eq);});
 
-        const summary=homeSummary(this.state.mt5Metrics);
+        const summary=homeSummary(this.state.mt5Metrics,mt5Today(),this.state.goal);
         const {todayPnl,todayCount}=summary;
         const maxdd=maxDD;
         const daily=data.daily||[]; let run=0;
@@ -1909,14 +1998,14 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div",{className:"kgf-logo"},"K"),
                 React.createElement("div",{className:"kgf-brand"},React.createElement("h1",null,"KOMA GOLD 日記"),React.createElement("p",null,"TRADE · LOG · ANALYZE · IMPROVE")),
                 React.createElement("em",null,"継続は、最強の武器。")),
-            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,`HFM · ${activeAccountsText(this.state.accounts)}`)),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
+            React.createElement("div",{className:"kgf-livebar"+(syncHealth.fresh?"":syncHealth.closed?" kgf-sync-closed":" kgf-sync-off")},React.createElement("div",{className:"kgf-live"},React.createElement("i",null),React.createElement("b",null,syncHealth.label),React.createElement("span",null,`HFM · ${activeAccountsText(this.state.accounts)}`)),React.createElement("small",null,s&&s.updated_at?"最終同期 "+japanTime(s.updated_at):"同期確認中")),
             syncHealth.message && React.createElement("p",{className:"kgf-sync-warning",role:"status"},syncHealth.message),
             React.createElement("section",{className:"kgf-account"},
                 metric("口座残高",s?Math.round(Number(s.balance)||0).toLocaleString("ja-JP")+"円":"—",""),
                 metric("有効証拠金",s?Math.round(Number(s.equity)||0).toLocaleString("ja-JP")+"円":"—",""),
                 metric("含み損益",s?signed(Math.round(Number(s.floating_pnl)||0))+"円":"—","",s?tone(Number(s.floating_pnl)||0):""),
                 metric("本日の損益",signed(Math.round(todayPnl))+"円",todayCount+"取引",tone(todayPnl))),
-            this.state.safeView==="home" && React.createElement(HomeSummaryCards,{summary}),
+            this.state.safeView==="home" && React.createElement(HomeSummaryCards,{summary,editor:this.renderGoalEditor("kgf-goal-mobile")}),
             React.createElement("div",{className:"kgf-chart-focus"},this.renderGoldChart()),
             React.createElement("section",{className:"kgf-four"},
                 metric("本日の損益",signed(Math.round(todayPnl))+"円",todayCount+"取引",tone(todayPnl)),
@@ -2037,7 +2126,7 @@ class GoldProfitNote extends React.Component {
                     const total=vals.length?vals[vals.length-1]:0;
                     const wins=rows.filter(r=>Number(r.pnl)>0).length, losses=rows.filter(r=>Number(r.pnl)<0).length;
                     const rate=wins+losses?wins/(wins+losses):0;
-                    const goal=100000, progress=Math.max(0,Math.min(100,total/goal*100));
+                    const goalSummary=homeSummary(this.state.mt5Metrics,mt5Today(),this.state.goal), progress=goalSummary.ring;
                     return React.createElement("section",{className:"gn-card gn-performance","aria-label":"パフォーマンス"},
                         React.createElement("div",{className:"gn-perf-head"},
                             React.createElement("div",null,
@@ -2058,8 +2147,10 @@ class GoldProfitNote extends React.Component {
                             ):React.createElement("div",{className:"gn-recent-empty"},"収支データを待っています。")),
                         React.createElement("div",{className:"gn-perf-split"},
                             React.createElement("div",{className:"gn-goal"},
-                                React.createElement("div",{className:"gn-goal-row"},React.createElement("span",null,"月間目標 +100,000円"),React.createElement("strong",{className:"gn-mono"},progress.toFixed(1)+"%")),
-                                React.createElement("div",{className:"gn-goal-track"},React.createElement("i",{style:{width:progress+"%"}}))),
+                                React.createElement("div",{className:"gn-goal-row"},React.createElement("span",null,"月間目標 "+signed(goalSummary.goal)+"円"),React.createElement("strong",{className:"gn-mono"},goalSummary.ready?goalSummary.progress.toFixed(1)+"%":"—")),
+                                React.createElement("div",{className:"gn-goal-track"},React.createElement("i",{style:{width:progress+"%"}})),
+                                React.createElement("div",{className:"gn-goal-row gn-goal-sub"},React.createElement("span",null,goalSummary.ready?"今月 "+signed(Math.round(goalSummary.monthPnl))+"円":"同期中"),React.createElement("span",{className:goalSummary.achieved?"gn-positive":""},goalPaceText(goalSummary))),
+                                this.renderGoalEditor("kgf-goal-pc")),
                             React.createElement("div",{className:"gn-winring"},
                                 React.createElement("div",{className:"gn-ring",style:{background:`conic-gradient(#67e2b8 ${rate*360}deg, rgba(255,125,149,.9) 0)`}},
                                     React.createElement("span",null,(rate*100).toFixed(1)+"%")),

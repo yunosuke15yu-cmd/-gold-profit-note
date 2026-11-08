@@ -17,6 +17,28 @@ assert.equal(app.state.accounts.length,1);assert.equal(app.state.accounts[0].id,
 assert.match(app.state.records[0].note,/old account note/);assert.match(app.state.records[0].note,/second account note/);
 assert.notEqual(vm.runInContext("accountStorageKey('hfm-4597')",appCtx),oldKey);
 assert.equal(vm.runInContext("tradeKey({account_id:'a',deal_ticket:7})!==tradeKey({account_id:'b',deal_ticket:7})",appCtx),true);
+{const run=e=>vm.runInContext(e,appCtx),closed=t=>run(`goldMarketClosed(Date.parse('${t}'))`);
+ // weekend close: New York Fri 17:00 - Sun 18:00, both EST and EDT
+ assert.equal(closed('2026-11-06T13:53:00Z'),false);assert.equal(closed('2026-11-06T22:30:00Z'),true);assert.equal(closed('2026-11-07T12:00:00Z'),true);
+ assert.equal(closed('2026-11-08T22:30:00Z'),true);assert.equal(closed('2026-11-08T23:30:00Z'),false);
+ assert.equal(closed('2026-07-10T20:30:00Z'),false);assert.equal(closed('2026-07-10T21:30:00Z'),true);assert.equal(closed('2026-07-12T22:30:00Z'),false);
+ const stale="{updated_at:'2026-11-06T13:52:39Z',account_statuses:[{id:'hfm-4701',label:'HFM · 4701',updated_at:'2026-11-06T13:52:39Z'}]}";
+ const sat=run(`mt5SyncHealth(${stale},'ok',Date.parse('2026-11-07T12:00:00Z'))`);assert.equal(sat.closed,true);assert.equal(sat.message,'');assert.equal(sat.label,'MT5 休場中');
+ const fri=run(`mt5SyncHealth(${stale},'ok',Date.parse('2026-11-06T15:00:00Z'))`);assert.notEqual(fri.closed,true);assert.match(fri.message,/止まっています/);
+ assert.equal(run(`mt5SyncHealth(${stale},'error',Date.parse('2026-11-07T12:00:00Z'))`).label,'MT5 通信エラー');
+ // monthly goal
+ assert.equal(run("parseGoal('１２０,０００円')"),120000);assert.equal(run("parseGoal('+80000')"),80000);
+ ['0','-5','abc','1.5','','2000000000'].forEach(v=>assert.equal(run(`parseGoal('${v}')`),null,v));
+ assert.equal(run("tradingDaysLeft('2026-11-27')"),2);assert.equal(run("tradingDaysLeft('2026-11-28')"),1);assert.equal(run("tradingDaysLeft('2026-11-02')"),21);
+ const g=run("homeSummary(mt5DailyMetrics([{trade_date:'2026-11-02',pnl:30000,trades:1},{trade_date:'2026-10-30',pnl:99999,trades:1}]),'2026-11-27',100000)");
+ assert.equal(g.monthPnl,30000);assert.equal(g.remaining,70000);assert.equal(g.daysLeft,2);assert.equal(g.perDay,35000);assert.equal(g.achieved,false);
+ assert.match(run('goalPaceText')(g),/^残り \+70,000円 · 1日 \+35,000円（あと2営業日）$/);
+ const done=run("homeSummary(mt5DailyMetrics([{trade_date:'2026-11-02',pnl:120000,trades:1}]),'2026-11-27',100000)");assert.equal(done.achieved,true);assert.equal(done.remaining,0);assert.equal(done.ring,100);
+}
+assert.equal(app.state.goal,100000);
+app.startGoalEdit();app.setState({goalInput:'abc'});app.saveGoal();assert.match(app.state.goalError,/整数/);assert.equal(store.get('gold-profit-note.goal.v1'),undefined);
+app.setState({goalInput:'150,000'});app.saveGoal();assert.equal(app.state.goal,150000);assert.equal(app.state.goalEditing,false);assert.equal(store.get('gold-profit-note.goal.v1'),'150000');
+assert.equal(new App({}).state.goal,150000);
 const payload=(id,pnl)=>({ok:true,accountId:id,accounts:app.state.accounts,daily:[{trade_date:'2026-10-23',pnl,trades:1,wins:1,losses:0,updated_at:'2026-10-24T00:00:00Z'}],status:{balance:pnl},trades:[{deal_ticket:1,net_pnl:pnl}],candles:[]});
 const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data});
 (async()=>{
@@ -30,8 +52,8 @@ const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data})
  app.state.importText=JSON.stringify({accountId:'hfm-5620',records:oldRecords});app.previewImport();assert.match(app.state.importError,/口座別/);
  assert.equal(JSON.parse(store.get(oldKey+'.account.hfm-4597')).records[0].pnl,222);
  const newer=app.syncFromMt5();resolve(2,payload('hfm-4597',999));await newer;assert.equal(app.state.syncState,'error');assert.equal(app.state.mt5Status.balance,22);
- const health=vm.runInContext('mt5SyncHealth',appCtx),now=Date.parse('2026-10-24T03:00:00Z');
- assert.equal(health({updated_at:'2026-10-24T02:59:00Z',account_statuses:[{label:'first',updated_at:'2026-10-24T02:59:00Z'},{label:'second',updated_at:'2026-10-24T02:50:00Z'}]},'ok',now).label,'MT5 一部同期停止');
+ const health=vm.runInContext('mt5SyncHealth',appCtx),now=Date.parse('2026-10-22T03:00:00Z');
+ assert.equal(health({updated_at:'2026-10-22T02:59:00Z',account_statuses:[{label:'first',updated_at:'2026-10-22T02:59:00Z'},{label:'second',updated_at:'2026-10-22T02:50:00Z'}]},'ok',now).label,'MT5 一部同期停止');
  console.log('PASS UI: combined default, old per-account notes/cache preserved, cache totals merged, delayed response guard, wrong response rejection, unique keys for identical tickets, partial sync warning');
  const edge=fs.readFileSync(path.join(__dirname,'..','supabase/functions/mt5-sync/index.ts'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/Deno\.serve\([\s\S]*$/,'');
  const ctx={Date,Response,Request,URL,TextEncoder,crypto:webcrypto};vm.createContext(ctx);vm.runInContext(edge,ctx);
