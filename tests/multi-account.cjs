@@ -39,6 +39,16 @@ assert.equal(app.state.goal,100000);
 app.startGoalEdit();app.setState({goalInput:'abc'});app.saveGoal();assert.match(app.state.goalError,/整数/);assert.equal(store.get('gold-profit-note.goal.v1'),undefined);
 app.setState({goalInput:'150,000'});app.saveGoal();assert.equal(app.state.goal,150000);assert.equal(app.state.goalEditing,false);assert.equal(store.get('gold-profit-note.goal.v1'),'150000');
 assert.equal(new App({}).state.goal,150000);
+{// monthly calendar uses the API daily totals; the trade list holds only the newest 500 deals
+ const run=e=>vm.runInContext(e,appCtx);
+ const daily="mt5DailyMetrics([{trade_date:'2026-11-02',pnl:31212,trades:99},{trade_date:'2026-11-04',pnl:34623,trades:91},{trade_date:'2026-11-07',pnl:0,trades:0},{trade_date:'2026-10-31',pnl:5,trades:1}]).daily";
+ const trades="[{trade_time:'2026-11-04T10:34:48+00:00',trade_date:'2026-11-04',net_pnl:-3000},{trade_time:'2026-11-04T12:00:00+00:00',trade_date:'2026-11-04',net_pnl:-98}]";
+ const m=run(`monthlyTradeAnalysis(${trades},'2026-11',${daily})`);
+ assert.equal(JSON.stringify(m.daily.map(d=>[d.date,d.pnl,d.trades])),JSON.stringify([['2026-11-02',31212,99],['2026-11-04',34623,91]]));
+ assert.equal(m.total,65835);assert.equal(m.trades,190);assert.equal(m.winDays,2);assert.equal(m.lossDays,0);
+ assert.equal(m.loadedTrades,2);assert.equal(m.tradesComplete,false);assert.equal(m.losses,2);
+ const old=run(`monthlyTradeAnalysis(${trades},'2026-11')`);assert.equal(old.total,-3098);assert.equal(old.tradesComplete,true);
+}
 const payload=(id,pnl)=>({ok:true,accountId:id,accounts:app.state.accounts,daily:[{trade_date:'2026-10-23',pnl,trades:1,wins:1,losses:0,updated_at:'2026-10-24T00:00:00Z'}],status:{balance:pnl},trades:[{deal_ticket:1,net_pnl:pnl}],candles:[]});
 const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data});
 (async()=>{

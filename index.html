@@ -1008,13 +1008,16 @@ function shiftMonth(month, offset) {
     const year = Number(month.slice(0, 4)), index = Number(month.slice(5, 7)) - 1;
     return new Date(Date.UTC(year, index + offset, 1)).toISOString().slice(0, 7);
 }
-function monthlyTradeAnalysis(trades, month) {
+function monthlyTradeAnalysis(trades, month, dailyRows) {
+    // dailyRows（API の日別集計・HFM サーバー日）があれば、カレンダー・月間損益・取引回数・勝ち負け日数はそちらを使う。
+    // API の取引明細は直近500件までなので、明細だけで日別を作ると古い日が欠ける。
     const rows = [];
     for (const trade of trades) {
         const time = trade && jstTradeTime(trade.trade_time);
         const pnl = trade && Number(trade.net_pnl);
-        if (time && time.date.slice(0, 7) === month && Number.isFinite(pnl))
-            rows.push({ ...time, pnl });
+        const day = trade && validDate(trade.trade_date) ? trade.trade_date : time && time.date;
+        if (time && day && day.slice(0, 7) === month && Number.isFinite(pnl))
+            rows.push({ ...time, date: dailyRows ? day : time.date, pnl });
     }
     rows.sort((a, b) => a.at - b.at);
     const days = new Map();
@@ -1031,9 +1034,15 @@ function monthlyTradeAnalysis(trades, month) {
         peak = Math.max(peak, equity);
         maxDD = Math.max(maxDD, peak - equity);
     }
-    const metrics = calculate([...days.values()]);
+    const fromDaily = Array.isArray(dailyRows)
+        ? dailyRows.filter(row => row && validDate(row.date) && row.date.slice(0, 7) === month && (row.pnl || row.trades))
+            .map(row => ({ date: row.date, pnl: finiteAmount(row.pnl), trades: Math.max(0, Math.floor(finiteAmount(row.trades))) }))
+        : null;
+    const metrics = calculate(fromDaily || [...days.values()]);
+    const monthTrades = fromDaily ? fromDaily.reduce((sum, row) => sum + row.trades, 0) : rows.length;
     return { daily: metrics.daily, total: metrics.total, winDays: metrics.wins,
-        lossDays: metrics.losses, trades: rows.length, wins, losses, grossProfit,
+        lossDays: metrics.losses, trades: monthTrades, loadedTrades: rows.length,
+        tradesComplete: rows.length >= monthTrades, wins, losses, grossProfit,
         grossLoss, maxDD, avgWin: wins ? grossProfit / wins : 0,
         avgLoss: losses ? grossLoss / losses : 0, maxWin, maxLoss };
 }
@@ -1905,7 +1914,8 @@ class GoldProfitNote extends React.Component {
     }
     renderMonthlyAnalysis() {
         const month = this.state.analysisMonth;
-        const result = monthlyTradeAnalysis(Array.isArray(this.state.mt5Trades) ? this.state.mt5Trades : [], month);
+        const result = monthlyTradeAnalysis(Array.isArray(this.state.mt5Trades) ? this.state.mt5Trades : [], month,
+            this.state.mt5Metrics ? this.state.mt5Metrics.daily : null);
         const daily = new Map(result.daily.map(day => [day.date, day]));
         const first = utcDate(`${month}-01`);
         const count = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
@@ -1935,7 +1945,7 @@ class GoldProfitNote extends React.Component {
                 React.createElement("button", { type: "button", "aria-label": "前月", onClick: () => this.setState({ analysisMonth: shiftMonth(month, -1) }) }, "‹"),
                 React.createElement("strong", { "aria-live": "polite" }, `${Number(month.slice(0, 4))}年${Number(month.slice(5, 7))}月`),
                 React.createElement("button", { type: "button", "aria-label": "翌月", onClick: () => this.setState({ analysisMonth: shiftMonth(month, 1) }) }, "›")),
-            React.createElement("p", { className: "kgf-analysis-source" }, "MT5確定取引を日本時間で集計"),
+            React.createElement("p", { className: "kgf-analysis-source" }, "日別損益はHFMサーバー日、時間帯は日本時間で集計"),
             React.createElement("div", { className: "kgf-analysis-grid" },
                 card("月間確定損益", signed(Math.round(result.total)) + "円", tone(result.total)),
                 card("勝率", rate), card("取引回数", result.trades + "回"),
@@ -1952,6 +1962,8 @@ class GoldProfitNote extends React.Component {
                     [["win", "勝ち"], ["loss", "負け"], ["neutral", "取引なし"]].map(([cls, label]) =>
                         React.createElement("span", { key: cls, className: cls }, React.createElement("i", { "aria-hidden": "true" }), label)))),
             React.createElement("h3", { className: "kgf-analysis-detail" }, "詳細分析"),
+            !result.tradesComplete && React.createElement("p", { className: "kgf-analysis-source" },
+                `勝率・PF・平均・最大・最大DDは、読み込めた直近の取引${result.loadedTrades}件（今月${result.trades}件中）から計算しています。`),
             React.createElement("div", { className: "kgf-analysis-grid" },
                 card("平均利益", signed(Math.round(result.avgWin)) + "円", "gn-positive"),
                 card("平均損失", result.avgLoss ? "−" + Math.round(result.avgLoss).toLocaleString("ja-JP") + "円" : "0円", "gn-negative"),
