@@ -28,6 +28,10 @@ All historical P/L and trades, including 5620 and 4597, remain in the combined d
 mt5_accounts.counted_until (date, nullable) is the last HFM server day an
 account adds to the combined diary. hfm-5620 is counted through 2026-10-31;
 its later rows stay in the database and in the scoped ?account=hfm-5620 view.
+mt5_accounts.counted_dates (date[]) lists extra server days after
+counted_until that still count (hfm-5620: 2026-11-11 only).
+mt5_accounts.accepts_uploads (boolean, default false) lets an archived
+account upload again without becoming active for balances or sync status.
 (hfm-5620 stays the legacy default id for the original localStorage key and
 the API default; that does not make it active.)
 Only active accounts contribute live balances, equity, positions, freshness,

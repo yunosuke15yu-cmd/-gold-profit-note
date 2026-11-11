@@ -38,8 +38,9 @@ async function readAccount(sb,account,tf) {
  return {daily:d.data||[],status:s.data,trades:t.data||[],candles:[...(c.data||[])].reverse()};
 }
 // counted_until (date, optional): last HFM server day this account adds to the combined diary.
-// Later rows stay in the database and in the scoped ?account=<id> view.
-const counted = (account,row) => !account.counted_until||String(row.trade_date)<=account.counted_until;
+// counted_dates (date[], optional): extra server days after counted_until that still count.
+// Other later rows stay in the database and in the scoped ?account=<id> view.
+const counted = (account,row) => {const d=String(row.trade_date);return !account.counted_until||d<=account.counted_until||(Array.isArray(account.counted_dates)&&account.counted_dates.includes(d));};
 function combineAccounts(accounts,allResults,tf) {
  const days=new Map(),sum=(xs,key)=>xs.reduce((total,row)=>total+(Number(row&&row[key])||0),0);
  const results=allResults.map((r,i)=>({...r,daily:r.daily.filter(row=>counted(accounts[i],row)),trades:r.trades.filter(row=>counted(accounts[i],row))}));
@@ -68,7 +69,7 @@ async function handleRequest(req,sb) {
   if(req.method==="GET"){
    const url=new URL(req.url),accountId=url.searchParams.get("account")||DEFAULT_ACCOUNT,tf=url.searchParams.get("tf")||"M15";
    if(!["M1","M5","M15","H1"].includes(tf))return reply({ok:false,error:"Invalid timeframe"},400);
-   const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order,is_active,counted_until").order("sort_order");
+   const {data:accounts,error}=await sb.from("mt5_accounts").select("id,label,broker,suffix,currency,symbol,sort_order,is_active,counted_until,counted_dates").order("sort_order");
    if(error)throw error;
    if(accountId==="all"){
     const results=await Promise.all(accounts.map(a=>readAccount(sb,a,tf)));
@@ -86,9 +87,10 @@ async function handleRequest(req,sb) {
    const {data:auth,error:authError}=await sb.from("mt5_account_auth").select("account_id,account_login,server").eq("key_hash",hash).maybeSingle();
    if(authError)throw authError;
    if(!auth)return reply({ok:false,error:"Unauthorized"},401);
-   const {data:account,error:accountError}=await sb.from("mt5_accounts").select("id,currency,symbol,is_active").eq("id",auth.account_id).single();
+   const {data:account,error:accountError}=await sb.from("mt5_accounts").select("id,currency,symbol,is_active,accepts_uploads").eq("id",auth.account_id).single();
    if(accountError)throw accountError;
-   if(account.is_active===false)return reply({ok:false,error:"Account is archived"},403);
+   // An archived account may still upload P/L (accepts_uploads); it never becomes active for balances/status.
+   if(account.is_active===false&&account.accepts_uploads!==true)return reply({ok:false,error:"Account is archived"},403);
    let upload;
    try {upload=prepareUpload(await req.json(),account,auth);}catch(_){return reply({ok:false,error:"Invalid payload or account identity"},400);}
    // Validate every section first. Write status last so failed uploads do not appear fresh.

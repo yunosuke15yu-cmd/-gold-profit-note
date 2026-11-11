@@ -121,5 +121,16 @@ const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data})
  const cutLive=await (await handle(new Request('https://example.test/?account=all'),sb)).json();
  assert.equal(cutLive.daily[0].pnl,5);assert(!cutLive.trades.some(t=>t.account_id==='hfm-5620'));
  const scoped5620=await (await handle(new Request('https://example.test/?account=hfm-5620'),sb)).json();assert.equal(scoped5620.daily.length,1);
+ // counted_dates: extra days after counted_until (11/11 counts, 11/5 still does not)
+ const extra=[{...cut[0],counted_dates:['2026-11-11']},cut[1]];
+ const extraRes=[{...cutRes[0],daily:[...cutRes[0].daily,{trade_date:'2026-11-11',pnl:5000,trades:2,wins:2,losses:0,updated_at:'2026-11-11T09:00:00Z'}],trades:[...cutRes[0].trades,{trade_date:'2026-11-11',trade_time:'2026-11-11T09:00:00Z',deal_ticket:9,account_id:'hfm-5620',net_pnl:5000}]},cutRes[1]];
+ const extraAll=combine(extra,extraRes,'M15');
+ assert.equal(JSON.stringify(extraAll.daily.map(d=>[d.trade_date,d.pnl])),JSON.stringify([['2026-10-31',-10],['2026-11-05',26101],['2026-11-11',5000]]));
+ assert.equal(extraAll.trades.map(t=>t.deal_ticket).join(),'9,3,1');assert.equal(extraAll.accounts.length,1);assert.equal(extraAll.status.account_statuses.length,1);
+ // accepts_uploads: an archived account may upload again but stays out of the active list
+ const before5620=writes.length;accounts[0].accepts_uploads=true;
+ assert.equal((await post('key0',{daily:[{date:'2026-11-11',pnl:5000,trades:2,wins:2,losses:0}]})).status,200);assert(writes.length>before5620);
+ const afterUpload=await (await handle(new Request('https://example.test/?account=all'),sb)).json();assert.deepEqual(afterUpload.accounts.map(a=>a.id),['hfm-4701']);
+ accounts[0].accepts_uploads=false;assert.equal((await post('key0',{daily:[{date:'2026-11-11',pnl:1,trades:1,wins:1,losses:0}]})).status,403);
  console.log('PASS API: combined daily/status/trades, oldest sync time, missing account, one representative price chart, scoped uploads remain isolated, private auth hidden, malformed uploads rejected, legacy compatibility');
 })().catch(e=>{console.error(e);process.exitCode=1;});
