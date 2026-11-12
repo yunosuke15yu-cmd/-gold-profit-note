@@ -35,7 +35,26 @@ async function readAccount(sb,account,tf) {
   sb.from("xau_candles").select("*").eq("account_id",id).eq("symbol",account.symbol).eq("timeframe",tf).order("candle_time",{ascending:false}).limit(120)
  ]);
  if(d.error||s.error||t.error||c.error)throw new Error("Data read failed");
- return {daily:d.data||[],status:s.data,trades:t.data||[],candles:[...(c.data||[])].reverse()};
+ const entries=await entryCounts(sb,id);
+ const daily=(d.data||[]).map(row=>{const e=entries.get(String(row.trade_date));return {...row,long_entries:e?e.buy.size:0,short_entries:e?e.sell.size:0};});
+ return {daily,status:s.data,trades:t.data||[],candles:[...(c.data||[])].reverse()};
+}
+// Long/short entries per HFM server day from every stored trade (not just the latest 500).
+// side is the original position direction; one position closed in parts counts once per day.
+async function entryCounts(sb,id) {
+ const days=new Map(),page=1000;
+ for(let from=0;;from+=page){
+  const r=await sb.from("mt5_trades").select("trade_date,side,position_id,deal_ticket").eq("account_id",id).order("deal_ticket").range(from,from+page-1);
+  if(r.error)throw new Error("Data read failed");
+  for(const row of r.data||[]){
+   if(row.side!=="buy"&&row.side!=="sell")continue;
+   const key=String(row.trade_date),day=days.get(key)||{buy:new Set(),sell:new Set()};
+   day[row.side].add(String(row.position_id||`deal-${row.deal_ticket}`));
+   days.set(key,day);
+  }
+  if(!r.data||r.data.length<page)break;
+ }
+ return days;
 }
 // counted_until (date, optional): last HFM server day this account adds to the combined diary.
 // counted_dates (date[], optional): extra server days after counted_until that still count.
@@ -45,8 +64,8 @@ function combineAccounts(accounts,allResults,tf) {
  const days=new Map(),sum=(xs,key)=>xs.reduce((total,row)=>total+(Number(row&&row[key])||0),0);
  const results=allResults.map((r,i)=>({...r,daily:r.daily.filter(row=>counted(accounts[i],row)),trades:r.trades.filter(row=>counted(accounts[i],row))}));
  for(const result of results)for(const row of result.daily){
-  const day=days.get(row.trade_date)||{account_id:"all",trade_date:row.trade_date,pnl:0,trades:0,wins:0,losses:0,source:"mt5",updated_at:row.updated_at};
-  for(const key of ["pnl","trades","wins","losses"])day[key]+=Number(row[key])||0;
+  const day=days.get(row.trade_date)||{account_id:"all",trade_date:row.trade_date,pnl:0,trades:0,wins:0,losses:0,long_entries:0,short_entries:0,source:"mt5",updated_at:row.updated_at};
+  for(const key of ["pnl","trades","wins","losses","long_entries","short_entries"])day[key]+=Number(row[key])||0;
   if(Date.parse(row.updated_at)>Date.parse(day.updated_at))day.updated_at=row.updated_at;
   days.set(row.trade_date,day);
  }

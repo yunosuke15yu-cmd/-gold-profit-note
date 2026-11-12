@@ -48,6 +48,11 @@ assert.equal(new App({}).state.goal,150000);
  assert.equal(m.total,65835);assert.equal(m.trades,190);assert.equal(m.winDays,2);assert.equal(m.lossDays,0);
  assert.equal(m.loadedTrades,2);assert.equal(m.tradesComplete,false);assert.equal(m.losses,2);
  const old=run(`monthlyTradeAnalysis(${trades},'2026-11')`);assert.equal(old.total,-3098);assert.equal(old.tradesComplete,true);
+ {const en=run("dailyEntryCounts([{trade_date:'2026-11-12',pnl:17133,long_entries:6,short_entries:4},{trade_date:'2026-11-11',pnl:-5,long_entries:0,short_entries:2},{trade_date:'2026-11-10',pnl:0,long_entries:0,short_entries:0},{trade_date:'2026-10-31',pnl:9,long_entries:9,short_entries:9}],[],'2026-11')");
+  assert.equal(en.complete,true);assert.equal(JSON.stringify(en.rows.map(r=>[r.date,r.long,r.short,r.total,r.pnl])),JSON.stringify([["2026-11-12",6,4,10,17133],["2026-11-11",0,2,2,-5]]));
+  assert.equal(en.long,6);assert.equal(en.short,6);assert.equal(en.total,12);
+  const fb=run("dailyEntryCounts([{trade_date:'2026-11-12',pnl:3}],[{trade_date:'2026-11-12',side:'buy',position_id:1,deal_ticket:1},{trade_date:'2026-11-12',side:'buy',position_id:1,deal_ticket:2},{trade_date:'2026-11-12',side:'sell',position_id:2,deal_ticket:3},{trade_date:'2026-10-30',side:'sell',position_id:3,deal_ticket:4}],'2026-11')");
+  assert.equal(fb.complete,false);assert.equal(JSON.stringify(fb.rows.map(r=>[r.date,r.long,r.short,r.pnl])),JSON.stringify([["2026-11-12",1,1,3]]));}
 }
 const payload=(id,pnl)=>({ok:true,accountId:id,accounts:app.state.accounts,daily:[{trade_date:'2026-10-23',pnl,trades:1,wins:1,losses:0,updated_at:'2026-10-24T00:00:00Z'}],status:{balance:pnl},trades:[{deal_ticket:1,net_pnl:pnl}],candles:[]});
 const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data});
@@ -72,7 +77,7 @@ const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data})
  const auths=accounts.map((a,i)=>({account_id:a.id,account_login:i+1,server:'HFM'+i,key_hash:createHash('sha256').update('key'+i).digest('hex')}));
  const db={mt5_accounts:accounts,mt5_account_auth:auths,daily_pnl:accounts.map((a,i)=>({account_id:a.id,trade_date:'2026-10-23',pnl:i+1})),mt5_status:accounts.map((a,i)=>({account_id:a.id,id:1,balance:(i+1)*100})),mt5_trades:accounts.map((a,i)=>({account_id:a.id,deal_ticket:7,net_pnl:i+1})),xau_candles:accounts.map((a,i)=>({account_id:a.id,symbol:a.symbol,timeframe:'M15',candle_time:'2026-10-23T00:00:00Z',close:i+1}))};
  const writes=[];
- const sb={from(table){let data=db[table].slice(),single=false;const builder={select(){return this;},eq(k,v){data=data.filter(r=>r[k]===v);return this;},order(){return this;},limit(n){data=data.slice(0,n);return this;},maybeSingle(){single=true;return this;},single(){single=true;return this;},upsert(rows,opts){writes.push({table,rows,opts});return Promise.resolve({error:null});},then(resolve){return Promise.resolve({data:single?(data[0]??null):data,error:null}).then(resolve);}};return builder;}};
+ const sb={from(table){let data=db[table].slice(),single=false;const builder={select(){return this;},eq(k,v){data=data.filter(r=>r[k]===v);return this;},order(){return this;},limit(n){data=data.slice(0,n);return this;},range(from,to){data=data.slice(from,to+1);return this;},maybeSingle(){single=true;return this;},single(){single=true;return this;},upsert(rows,opts){writes.push({table,rows,opts});return Promise.resolve({error:null});},then(resolve){return Promise.resolve({data:single?(data[0]??null):data,error:null}).then(resolve);}};return builder;}};
  for(const [i,a] of accounts.entries()){const res=await handle(new Request('https://example.test/?account='+a.id),sb);assert.equal(res.status,200);const body=await res.json();assert.equal(body.accountId,a.id);assert.equal(body.daily.length,1);assert.equal(body.daily[0].pnl,i+1);assert.equal(body.trades[0].net_pnl,i+1);assert.equal(body.status.balance,(i+1)*100);assert.equal(body.candles[0].close,i+1);assert(!JSON.stringify(body).includes('key_hash'));}
  const allResponse=await handle(new Request('https://example.test/?account=all'),sb);assert.equal(allResponse.status,200);const combined=await allResponse.json();
  assert.equal(combined.accountId,'all');assert.equal(combined.daily.length,1);assert.equal(combined.daily[0].pnl,6);assert.equal(combined.status.balance,600);assert.equal(combined.trades.length,3);assert.equal(combined.candles[0].close,1);assert.equal(combined.status.account_statuses.length,3);
@@ -132,5 +137,16 @@ const resolve=(index,data)=>pending[index].resolve({ok:true,json:async()=>data})
  assert.equal((await post('key0',{daily:[{date:'2026-11-11',pnl:5000,trades:2,wins:2,losses:0}]})).status,200);assert(writes.length>before5620);
  const afterUpload=await (await handle(new Request('https://example.test/?account=all'),sb)).json();assert.deepEqual(afterUpload.accounts.map(a=>a.id),['hfm-4701']);
  accounts[0].accepts_uploads=false;assert.equal((await post('key0',{daily:[{date:'2026-11-11',pnl:1,trades:1,wins:1,losses:0}]})).status,403);
+ // daily long/short entries: every stored trade (paged past 1000), side = original position, partial closes once
+ {const entryCounts=vm.runInContext("entryCounts",ctx),rows=[];
+  for(let i=0;i<1200;i++)rows.push({account_id:"x",trade_date:i<1100?"2026-11-11":"2026-11-12",side:i%3===0?"sell":"buy",position_id:i,deal_ticket:i});
+  rows.push({account_id:"x",trade_date:"2026-11-12",side:"buy",position_id:1100,deal_ticket:5000},{account_id:"x",trade_date:"2026-11-12",side:"other",position_id:9,deal_ticket:5001},{account_id:"y",trade_date:"2026-11-12",side:"buy",position_id:1,deal_ticket:1});
+  let pages=0;const psb={from(){let data=rows.slice();return {select(){return this;},eq(k,v){data=data.filter(r=>r[k]===v);return this;},order(){return this;},range(a,b){pages++;data=data.slice(a,b+1);return this;},then(res){return Promise.resolve({data,error:null}).then(res);}};}};
+  const m=await entryCounts(psb,"x");assert.equal(pages,2);
+  assert.equal(m.get("2026-11-11").buy.size,733);assert.equal(m.get("2026-11-11").sell.size,367);
+  assert.equal(m.get("2026-11-12").buy.size,67);assert.equal(m.get("2026-11-12").sell.size,33);
+  const sum=combine([{id:"a"},{id:"b",counted_until:"2026-10-31"}],[{daily:[{trade_date:"2026-11-12",pnl:1,trades:3,long_entries:2,short_entries:1}],status:null,trades:[],candles:[]},{daily:[{trade_date:"2026-11-12",pnl:1,trades:9,long_entries:5,short_entries:4}],status:null,trades:[],candles:[]}],"M15");
+  assert.equal(sum.daily[0].long_entries,2);assert.equal(sum.daily[0].short_entries,1);
+  const one=await (await handle(new Request("https://example.test/?account=hfm-4701"),sb)).json();assert.equal(one.daily[0].long_entries,0);assert.equal(one.daily[0].short_entries,0);}
  console.log('PASS API: combined daily/status/trades, oldest sync time, missing account, one representative price chart, scoped uploads remain isolated, private auth hidden, malformed uploads rejected, legacy compatibility');
 })().catch(e=>{console.error(e);process.exitCode=1;});

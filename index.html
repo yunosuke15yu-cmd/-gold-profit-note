@@ -378,6 +378,7 @@ body{background:radial-gradient(circle at 80% -10%,rgba(217,183,95,.09),transpar
 .kgf-timing-table caption{text-align:left;color:#c6d5df;font-size:11px;margin:4px 0 10px}
 .kgf-timing-table th,.kgf-timing-table td{padding:12px 5px;border-bottom:1px solid #223742;text-align:right;white-space:nowrap}
 .kgf-timing-table th:first-child{text-align:left}
+.kgf-entries .kgf-entries-long{color:#6cddab}.kgf-entries .kgf-entries-short{color:#ff91a0}
 .kgf-timing-table thead th{color:#93a9b8;font-size:10px;font-weight:500}
 .kgf-timing-table tbody th{font-size:11px;font-weight:500;color:#c6d5df}
 .kgf-timing-table .kgf-timing-pnl{position:relative;min-width:83px}
@@ -1046,6 +1047,35 @@ function monthlyTradeAnalysis(trades, month, dailyRows) {
         grossLoss, maxDD, avgWin: wins ? grossProfit / wins : 0,
         avgLoss: losses ? grossLoss / losses : 0, maxWin, maxLoss };
 }
+function dailyEntryCounts(apiDaily, trades, month) {
+    // 日別のロング・ショートのエントリー回数（HFM サーバー日、決済した日で数える）。
+    // API の日別集計に long_entries / short_entries があればそれを使う（DB の全取引から集計済み）。
+    // 無い場合だけ、読み込めた直近の明細から数える（complete=false）。
+    const rows = (Array.isArray(apiDaily) ? apiDaily : [])
+        .filter(row => row && validDate(row.trade_date) && row.trade_date.slice(0, 7) === month);
+    const fromApi = rows.length > 0 && rows.every(row => Number.isFinite(Number(row.long_entries)) && Number.isFinite(Number(row.short_entries))
+        && row.long_entries != null && row.short_entries != null);
+    const count = value => Math.max(0, Math.floor(finiteAmount(value)));
+    let list;
+    if (fromApi) {
+        list = rows.map(row => ({ date: row.trade_date, long: count(row.long_entries), short: count(row.short_entries), pnl: finiteAmount(row.pnl) }));
+    } else {
+        const days = new Map();
+        for (const trade of Array.isArray(trades) ? trades : []) {
+            if (!trade || !validDate(trade.trade_date) || trade.trade_date.slice(0, 7) !== month) continue;
+            if (trade.side !== "buy" && trade.side !== "sell") continue;
+            const day = days.get(trade.trade_date) || { date: trade.trade_date, buy: new Set(), sell: new Set() };
+            day[trade.side].add(String(trade.position_id || `deal-${trade.deal_ticket}`));
+            days.set(trade.trade_date, day);
+        }
+        const pnlByDate = new Map(rows.map(row => [row.trade_date, finiteAmount(row.pnl)]));
+        list = [...days.values()].map(day => ({ date: day.date, long: day.buy.size, short: day.sell.size, pnl: pnlByDate.has(day.date) ? pnlByDate.get(day.date) : null }));
+    }
+    list = list.filter(row => row.long + row.short > 0).map(row => ({ ...row, total: row.long + row.short }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+    const long = list.reduce((sum, row) => sum + row.long, 0), short = list.reduce((sum, row) => sum + row.short, 0);
+    return { rows: list, long, short, total: long + short, complete: fromApi };
+}
 function calendarAmount(value) {
     const abs = Math.abs(Math.round(value));
     const compact = abs >= 10000 ? new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 }).format(abs) : abs.toLocaleString("ja-JP");
@@ -1618,7 +1648,7 @@ class GoldProfitNote extends React.Component {
                 const next = Array.from(byDate.values()).sort((a,b)=>a.date.localeCompare(b.date));
                 const savedAt = nowISO();
                 const warning = this.persist(next, savedAt);
-                this.setState({ records: next, savedAt, warning, accounts: Array.isArray(payload.accounts) && payload.accounts.length ? payload.accounts : this.state.accounts, mt5Metrics: mt5DailyMetrics(payload.daily), mt5Status: payload.status || null, mt5Trades: Array.isArray(payload.trades) ? payload.trades : [], mt5Candles: Array.isArray(payload.candles) ? payload.candles : [], syncState: "ok" });
+                this.setState({ records: next, savedAt, warning, accounts: Array.isArray(payload.accounts) && payload.accounts.length ? payload.accounts : this.state.accounts, mt5Metrics: mt5DailyMetrics(payload.daily), mt5Daily: Array.isArray(payload.daily) ? payload.daily : [], mt5Status: payload.status || null, mt5Trades: Array.isArray(payload.trades) ? payload.trades : [], mt5Candles: Array.isArray(payload.candles) ? payload.candles : [], syncState: "ok" });
                 if (!silent) this.notify("MT5の最新データを反映しました。");
             } catch (_) {
                 if (!isCurrent()) return;
@@ -1643,7 +1673,7 @@ class GoldProfitNote extends React.Component {
             theme: theme.theme, tab: "daily", date: mt5Today(), pnlInput: "", note: "",
             editing: null, formError: "", formErrorField: null, deleteTarget: null,
             notice: "", transfer: null, importText: "", importMode: "merge", importPreview: null,
-            importError: "", copyMessage: "", mt5Metrics: null, mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), timingMode: "hour", timingHours: 3, syncState: "loading", goal: loadGoal(), goalEditing: false, goalInput: "", goalError: "",
+            importError: "", copyMessage: "", mt5Metrics: null, mt5Daily: [], mt5Status: null, mt5Trades: [], mt5Candles: [], chartTf: "M15", safeView: "home", analysisMonth: jstDate(new Date()).slice(0, 7), timingMode: "hour", timingHours: 3, syncState: "loading", goal: loadGoal(), goalEditing: false, goalInput: "", goalError: "",
         };
     }
     startGoalEdit() { this.setState({ goalEditing: true, goalInput: String(this.state.goal), goalError: "" }); }
@@ -1961,6 +1991,7 @@ class GoldProfitNote extends React.Component {
                 React.createElement("div", { className: "kgf-calendar-legend" },
                     [["win", "勝ち"], ["loss", "負け"], ["neutral", "取引なし"]].map(([cls, label]) =>
                         React.createElement("span", { key: cls, className: cls }, React.createElement("i", { "aria-hidden": "true" }), label)))),
+            this.renderDailyEntries(month),
             React.createElement("h3", { className: "kgf-analysis-detail" }, "詳細分析"),
             !result.tradesComplete && React.createElement("p", { className: "kgf-analysis-source" },
                 `勝率・PF・平均・最大・最大DDは、読み込めた直近の取引${result.loadedTrades}件（今月${result.trades}件中）から計算しています。`),
@@ -1971,6 +2002,29 @@ class GoldProfitNote extends React.Component {
                 card("最大損失", result.maxLoss ? "−" + Math.round(result.maxLoss).toLocaleString("ja-JP") + "円" : "0円", "gn-negative")),
             React.createElement("h3", { className: "kgf-analysis-detail" }, "損益推移"),
             React.createElement("div", { className: "kgf-analysis-chart" }, React.createElement(ProfitChart, { daily: result.daily })));
+    }
+    renderDailyEntries(month) {
+        const e = React.createElement;
+        const result = dailyEntryCounts(this.state.mt5Daily, this.state.mt5Trades, month);
+        const label = `${Number(month.slice(0, 4))}年${Number(month.slice(5, 7))}月`;
+        return e("section", { className: "kgf-timing kgf-entries", "aria-label": "日別エントリー回数" },
+            e("h3", null, "日別エントリー回数"),
+            result.rows.length === 0 ? e("p", { className: "kgf-timing-summary" }, `${label}のエントリーはまだありません。`) :
+            e("table", { className: "kgf-timing-table" },
+                e("caption", null, `${label} · ロング ${result.long}回 / ショート ${result.short}回 / 合計 ${result.total}回`),
+                e("thead", null, e("tr", null, ["日付", "ロング", "ショート", "合計", "損益"].map(h => e("th", { key: h, scope: "col" }, h)))),
+                e("tbody", null, result.rows.map(row => {
+                    const d = utcDate(row.date);
+                    return e("tr", { key: row.date },
+                        e("th", { scope: "row" }, `${Number(row.date.slice(5, 7))}/${Number(row.date.slice(8, 10))}（${WEEKDAYS[d.getUTCDay()]}）`),
+                        e("td", { className: "kgf-entries-long" }, `${row.long}回`),
+                        e("td", { className: "kgf-entries-short" }, `${row.short}回`),
+                        e("td", null, `${row.total}回`),
+                        e("td", null, row.pnl == null ? "—" : e("strong", { className: tone(row.pnl) }, `${signed(Math.round(row.pnl))}円`)));
+                }))),
+            e("p", { className: "kgf-timing-note" }, result.complete
+                ? "HFMサーバー日・決済した日で数えています。分割決済した建玉は1回です。"
+                : "読み込めた直近の取引から数えています。古い日は少なく表示される場合があります。"));
     }
     renderTradeTiming(showMonthControls = true) {
         return React.createElement(TradeTimingPanel, {
